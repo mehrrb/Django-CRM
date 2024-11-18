@@ -1,195 +1,139 @@
-from datetime import datetime, timedelta
-
+from django.shortcuts import render, get_object_or_404, redirect
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.core.mail import EmailMessage
-from django.http import HttpResponseRedirect
-from django.shortcuts import get_object_or_404, render
-from django.urls import reverse
+from django.template.loader import render_to_string
+from django.conf import settings
 
-from emails.forms import EmailForm
 from emails.models import Email
+from emails.forms import EmailForm
 
-
+@login_required
 def emails_list(request):
-    filter_list = Email.objects.all()
-    if request.GET.get("from_date", ""):
-        from_date = request.GET.get("from_date", "")
-        fd = datetime.strptime(from_date, "%Y-%m-%d").date()
-        filter_list = filter_list.filter(send_time__gte=fd)
-    if request.GET.get("to_date", ""):
-        to_date = request.GET.get("to_date", "")
-        td = datetime.strptime(to_date, "%Y-%m-%d")
-        td = td + timedelta(seconds=(24 * 60 * 60 - 1))
-        filter_list = filter_list.filter(send_time__lte=td)
-    if request.GET.get("name", ""):
-        name = request.GET.get("name", "")
-        filter_list = filter_list.filter(to_email__startswith=name)
-    return render(request, "mail_all.html", {"filter_list": filter_list})
+    emails = Email.objects.filter(user=request.user)
+    context = {'emails': emails}
+    return render(request, 'emails/emails_list.html', context)
 
-
-def email(request):
-    if request.method == "POST":
-        form = EmailForm(request.POST, request.FILES)
-        if form.is_valid():
-            subject = request.POST.get("subject", "")
-            message = request.POST.get("message", "")
-            from_email = request.POST.get("from_email", "")
-            to_email = request.POST.get("to_email", "")
-            file = request.FILES.get("files", None)
-            status = request.POST.get("email_draft", "")
-            email = EmailMessage(subject, message, from_email, [to_email])
-            email.content_subtype = "html"
-            f = form.save()
-            if file is not None:
-                email.attach(file.name, file.read(), file.content_type)
-                f.file = file
-            if status:
-                f.status = "draft"
-            else:
-                email.send(fail_silently=False)
-            f.save()
-            return HttpResponseRedirect(reverse("emails:list"))
-        else:
-            return render(request, "create_mail.html", {"form": form})
-    else:
-        form = EmailForm()
-        return render(request, "create_mail.html", {"form": form})
-
-
-def email_sent(request):
-    filter_list = Email.objects.filter(status="sent")
-    if request.GET.get("from_date", ""):
-        from_date = request.GET.get("from_date", "")
-        fd = datetime.strptime(from_date, "%Y-%m-%d").date()
-        filter_list = filter_list.filter(send_time__gte=fd)
-    if request.GET.get("to_date", ""):
-        to_date = request.GET.get("to_date", "")
-        td = datetime.strptime(to_date, "%Y-%m-%d")
-        td = td + timedelta(seconds=(24 * 60 * 60 - 1))
-        filter_list = filter_list.filter(send_time__lte=td)
-    if request.GET.get("name", ""):
-        name = request.GET.get("name", "")
-        filter_list = filter_list.filter(to_email__startswith=name)
-    return render(request, "mail_sent.html", {"filter_list": filter_list})
-
-
-def email_trash(request):
-    filter_list = Email.objects.filter(status="trash")
-    if request.GET.get("from_date", ""):
-        from_date = request.GET.get("from_date", "")
-        fd = datetime.strptime(from_date, "%Y-%m-%d").date()
-        filter_list = filter_list.filter(send_time__gte=fd)
-    if request.GET.get("to_date", ""):
-        to_date = request.GET.get("to_date", "")
-        td = datetime.strptime(to_date, "%Y-%m-%d")
-        td = td + timedelta(seconds=(24 * 60 * 60 - 1))
-        filter_list = filter_list.filter(send_time__lte=td)
-    if request.GET.get("name", ""):
-        name = request.GET.get("name", "")
-        filter_list = filter_list.filter(to_email__startswith=name)
-    return render(request, "mail_trash.html", {"filter_list": filter_list})
-
-
-def email_trash_delete(request, pk):
-    get_object_or_404(Email, id=pk).delete()
-    return HttpResponseRedirect(reverse("emails:email_trash"))
-
-
-def email_draft(request):
-    filter_list = Email.objects.filter(status="draft")
-    if request.GET.get("from_date", ""):
-        from_date = request.GET.get("from_date", "")
-        fd = datetime.strptime(from_date, "%Y-%m-%d").date()
-        filter_list = filter_list.filter(send_time__gte=fd)
-    if request.GET.get("to_date", ""):
-        to_date = request.GET.get("to_date", "")
-        td = datetime.strptime(to_date, "%Y-%m-%d")
-        td = td + timedelta(seconds=(24 * 60 * 60 - 1))
-        filter_list = filter_list.filter(send_time__lte=td)
-    if request.GET.get("name", ""):
-        name = request.GET.get("name", "")
-        filter_list = filter_list.filter(to_email__startswith=name)
-    return render(request, "mail_drafts.html", {"filter_list": filter_list})
-
-
-def email_draft_delete(request, pk):
-    get_object_or_404(Email, id=pk).delete()
-    return HttpResponseRedirect(reverse("emails:email_draft"))
-
-
-def email_delete(request, pk):
-    get_object_or_404(Email, id=pk).delete()
-    return HttpResponseRedirect(reverse("emails:email_sent"))
-
-
-def email_move_to_trash(request, pk):
-    trashitem = get_object_or_404(Email, id=pk)
-    trashitem.status = "trash"
-    trashitem.save()
-    return HttpResponseRedirect(request.META["HTTP_REFERER"])
-
-
-def email_imp(request, pk):
-    impitem = get_object_or_404(Email, id=pk)
-    impitem.important = True
-    impitem.save()
-    return HttpResponseRedirect(request.META["HTTP_REFERER"])
-
-
-def email_imp_list(request):
-    filter_list = Email.objects.filter(important="True")
-    if request.GET.get("from_date", ""):
-        from_date = request.GET.get("from_date", "")
-        fd = datetime.strptime(from_date, "%Y-%m-%d").date()
-        filter_list = filter_list.filter(send_time__gte=fd)
-
-    if request.GET.get("to_date", ""):
-        to_date = request.GET.get("to_date", "")
-        td = datetime.strptime(to_date, "%Y-%m-%d")
-        td = td + timedelta(seconds=(24 * 60 * 60 - 1))
-        filter_list = filter_list.filter(send_time__lte=td)
-    if request.GET.get("name", ""):
-        name = request.GET.get("name", "")
-        filter_list = filter_list.filter(to_email__startswith=name)
-    return render(request, "mail_important.html", {"filter_list": filter_list})
-
-
-def email_sent_edit(request, pk):
-    em = get_object_or_404(Email, pk=pk)
-    if request.method == "POST":
-        form = EmailForm(request.POST, instance=em)
-        if form.is_valid():
-            subject = request.POST.get("subject", "")
-            message = request.POST.get("message", "")
-            from_email = request.POST.get("from_email", "")
-            to_email = request.POST.get("to_email", "")
-            file = request.FILES.get("files", None)
-            status = request.POST.get("email_draft", "")
-            email = EmailMessage(subject, message, from_email, [to_email])
-            email.content_subtype = "html"
-            f = form.save()
-            if file is not None:
-                email.attach(file.name, file.read(), file.content_type)
-                f.file = file
-            if status:
-                f.status = "draft"
-            else:
-                email.send(fail_silently=False)
-                f.status = "sent"
-            f.save()
-            return HttpResponseRedirect(reverse("emails:list"))
-        return render(request, "create_mail.html", {"form": form, "em": em})
+@login_required
+def email_compose(request):
     form = EmailForm()
-    return render(request, "create_mail.html", {"form": form, "em": em})
+    context = {'form': form}
+    return render(request, 'emails/email_compose.html', context)
 
+@login_required
+def email_send(request):
+    if request.method == 'POST':
+        form = EmailForm(request.POST)
+        if form.is_valid():
+            email = form.save(commit=False)
+            email.user = request.user
+            email.save()
+            
+            # Send actual email
+            subject = email.subject
+            message = email.message
+            from_email = settings.DEFAULT_FROM_EMAIL
+            recipient_list = [email.to_email]
+            
+            email_message = EmailMessage(subject, message, from_email, recipient_list)
+            email_message.send()
+            
+            return redirect('emails:email_sent')
+    return redirect('emails:compose')
 
-def email_unimp(request, pk):
-    unimpitem = get_object_or_404(Email, id=pk)
-    unimpitem.important = False
-    unimpitem.save()
-    return HttpResponseRedirect(request.META["HTTP_REFERER"])
+@login_required
+def email_sent(request):
+    emails = Email.objects.filter(user=request.user, is_sent=True)
+    context = {'emails': emails}
+    return render(request, 'emails/email_sent.html', context)
 
+@login_required
+def email_move_to_trash(request):
+    if request.method == 'POST':
+        email_id = request.POST.get('email_id')
+        email = get_object_or_404(Email, id=email_id, user=request.user)
+        email.is_trash = True
+        email.save()
+        return JsonResponse({'status': 'success'})
+    return JsonResponse({'status': 'error'})
 
-def email_view(request, pk):
-    email_view = get_object_or_404(Email, pk=pk)
-    x = EmailForm(instance=email_view)
-    return render(request, "create_mail.html", {"x": x})
+@login_required
+def email_delete(request):
+    if request.method == 'POST':
+        email_id = request.POST.get('email_id')
+        email = get_object_or_404(Email, id=email_id, user=request.user)
+        email.delete()
+        return JsonResponse({'status': 'success'})
+    return JsonResponse({'status': 'error'})
+
+@login_required
+def email_trash(request):
+    emails = Email.objects.filter(user=request.user, is_trash=True)
+    context = {'emails': emails}
+    return render(request, 'emails/email_trash.html', context)
+
+@login_required
+def email_draft(request):
+    emails = Email.objects.filter(user=request.user, is_draft=True)
+    context = {'emails': emails}
+    return render(request, 'emails/email_draft.html', context)
+
+@login_required
+def email_draft_delete(request):
+    if request.method == 'POST':
+        email_id = request.POST.get('email_id')
+        email = get_object_or_404(Email, id=email_id, user=request.user, is_draft=True)
+        email.delete()
+        return JsonResponse({'status': 'success'})
+    return JsonResponse({'status': 'error'})
+
+@login_required
+def email_imp_list(request):
+    emails = Email.objects.filter(user=request.user, is_important=True)
+    context = {'emails': emails}
+    return render(request, 'emails/email_important.html', context)
+
+@login_required
+def email_mark_as_important(request):
+    if request.method == 'POST':
+        email_id = request.POST.get('email_id')
+        email = get_object_or_404(Email, id=email_id, user=request.user)
+        email.is_important = True
+        email.save()
+        return JsonResponse({'status': 'success'})
+    return JsonResponse({'status': 'error'})
+
+@login_required
+def email_mark_as_not_important(request):
+    if request.method == 'POST':
+        email_id = request.POST.get('email_id')
+        email = get_object_or_404(Email, id=email_id, user=request.user)
+        email.is_important = False
+        email.save()
+        return JsonResponse({'status': 'success'})
+    return JsonResponse({'status': 'error'})
+
+@login_required
+def email_sent_edit(request, pk):
+    email = get_object_or_404(Email, id=pk, user=request.user)
+    if request.method == 'POST':
+        form = EmailForm(request.POST, instance=email)
+        if form.is_valid():
+            form.save()
+            return redirect('emails:email_sent')
+    else:
+        form = EmailForm(instance=email)
+    context = {'form': form, 'email': email}
+    return render(request, 'emails/email_sent_edit.html', context)
+
+@login_required
+def email_sent_delete(request, pk):
+    email = get_object_or_404(Email, id=pk, user=request.user)
+    email.delete()
+    return redirect('emails:email_sent')
+
+@login_required
+def email_trash_delete(request, pk):
+    email = get_object_or_404(Email, id=pk, user=request.user, is_trash=True)
+    email.delete()
+    return redirect('emails:email_trash')

@@ -11,6 +11,7 @@ from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from phonenumber_field.modelfields import PhoneNumberField
+from django.conf import settings
 
 from common.templatetags.common_tags import (
     is_document_file_audio,
@@ -147,7 +148,6 @@ class Org(BaseModel):
 #     activation_key = models.CharField(max_length=150, null=True, blank=True)
 #     key_expires = models.DateTimeField(null=True, blank=True)
 
-
 #     USERNAME_FIELD = "email"
 #     REQUIRED_FIELDS = ["username"]
 
@@ -233,227 +233,59 @@ class Profile(BaseModel):
 
 
 class Comment(BaseModel):
-    case = models.ForeignKey(
-        "cases.Case",
-        blank=True,
-        null=True,
-        related_name="cases",
-        on_delete=models.CASCADE,
-    )
-    comment = models.CharField(max_length=255)
-    commented_on = models.DateTimeField(auto_now_add=True)
-    commented_by = models.ForeignKey(
-        Profile, on_delete=models.CASCADE, blank=True, null=True
-    )
+    comment = models.TextField()
     account = models.ForeignKey(
-        "accounts.Account",
+        'accounts.Account',
         blank=True,
         null=True,
         related_name="accounts_comments",
-        on_delete=models.CASCADE,
-    )
-    lead = models.ForeignKey(
-        "leads.Lead",
-        blank=True,
-        null=True,
-        related_name="leads_comments",
-        on_delete=models.CASCADE,
-    )
-    opportunity = models.ForeignKey(
-        "opportunity.Opportunity",
-        blank=True,
-        null=True,
-        related_name="opportunity_comments",
-        on_delete=models.CASCADE,
+        on_delete=models.CASCADE
     )
     contact = models.ForeignKey(
-        "contacts.Contact",
+        'contacts.Contact',
         blank=True,
         null=True,
         related_name="contact_comments",
-        on_delete=models.CASCADE,
+        on_delete=models.CASCADE
     )
-    profile = models.ForeignKey(
-        "Profile",
-        blank=True,
-        null=True,
-        related_name="user_comments",
-        on_delete=models.CASCADE,
-    )
-
-    task = models.ForeignKey(
-        "tasks.Task",
-        blank=True,
-        null=True,
-        related_name="tasks_comments",
-        on_delete=models.CASCADE,
-    )
-
     invoice = models.ForeignKey(
-        "invoices.Invoice",
+        'invoices.Invoice',
         blank=True,
         null=True,
         related_name="invoice_comments",
-        on_delete=models.CASCADE,
+        on_delete=models.CASCADE
     )
-
-    event = models.ForeignKey(
-        "events.Event",
-        blank=True,
-        null=True,
-        related_name="events_comments",
-        on_delete=models.CASCADE,
-    )
-
-    class Meta:
-        verbose_name = "Comment"
-        verbose_name_plural = "Comments"
-        db_table = "comment"
-        ordering = ("-created_at",)
 
     def __str__(self):
-        return f"{self.comment}"
-
-    def get_files(self):
-        return CommentFiles.objects.filter(comment_id=self)
-
-    @property
-    def commented_on_arrow(self):
-        return arrow.get(self.commented_on).humanize()
-
-
-class CommentFiles(BaseModel):
-    comment = models.ForeignKey(Comment, on_delete=models.CASCADE)
-    updated_on = models.DateTimeField(auto_now_add=True)
-    comment_file = models.FileField(
-        "File", upload_to="CommentFiles", null=True, blank=True
-    )
-
-    class Meta:
-        verbose_name = "CommentFile"
-        verbose_name_plural = "CommentFiles"
-        db_table = "commentFiles"
-        ordering = ("-created_at",)
-
-    def __str__(self):
-        return f"{self.comment.comment}"
-
-    def get_file_name(self):
-        if self.comment_file:
-            return self.comment_file.path.split("/")[-1]
-
-        return None
-
+        return self.comment
 
 class Attachments(BaseModel):
-    created_by = models.ForeignKey(
-        User,
-        related_name="attachment_created_by",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-    )
     file_name = models.CharField(max_length=60)
-    attachment = models.FileField(max_length=1001, upload_to="attachments/%Y/%m/")
-    lead = models.ForeignKey(
-        "leads.Lead",
-        null=True,
-        blank=True,
-        related_name="lead_attachment",
-        on_delete=models.CASCADE,
-    )
+    attachment = models.FileField(max_length=1001, upload_to='attachments/%Y/%m/')
     account = models.ForeignKey(
-        "accounts.Account",
-        null=True,
+        'accounts.Account',
         blank=True,
-        related_name="account_attachment",
-        on_delete=models.CASCADE,
+        null=True,
+        related_name='account_attachment',
+        on_delete=models.CASCADE
     )
     contact = models.ForeignKey(
-        "contacts.Contact",
-        on_delete=models.CASCADE,
-        related_name="contact_attachment",
+        'contacts.Contact',
         blank=True,
         null=True,
+        related_name='contact_attachment',
+        on_delete=models.CASCADE
     )
-    opportunity = models.ForeignKey(
-        "opportunity.Opportunity",
-        blank=True,
-        null=True,
-        on_delete=models.CASCADE,
-        related_name="opportunity_attachment",
-    )
-    case = models.ForeignKey(
-        "cases.Case",
-        blank=True,
-        null=True,
-        on_delete=models.CASCADE,
-        related_name="case_attachment",
-    )
-
-    task = models.ForeignKey(
-        "tasks.Task",
-        blank=True,
-        null=True,
-        related_name="tasks_attachment",
-        on_delete=models.CASCADE,
-    )
-
     invoice = models.ForeignKey(
-        "invoices.Invoice",
+        'invoices.Invoice',
         blank=True,
         null=True,
-        related_name="invoice_attachment",
-        on_delete=models.CASCADE,
+        related_name='invoice_attachment',
+        on_delete=models.CASCADE
     )
-    event = models.ForeignKey(
-        "events.Event",
-        blank=True,
-        null=True,
-        related_name="events_attachment",
-        on_delete=models.CASCADE,
-    )
-
-    class Meta:
-        verbose_name = "Attachment"
-        verbose_name_plural = "Attachments"
-        db_table = "attachments"
-        ordering = ("-created_at",)
 
     def __str__(self):
-        return f"{self.file_name}"
-
-    def file_type(self):
-        name_ext_list = self.attachment.url.split(".")
-        if len(name_ext_list) > 1:
-            ext = name_ext_list[int(len(name_ext_list) - 1)]
-            if is_document_file_audio(ext):
-                return ("audio", "fa fa-file-audio")
-            if is_document_file_video(ext):
-                return ("video", "fa fa-file-video")
-            if is_document_file_image(ext):
-                return ("image", "fa fa-file-image")
-            if is_document_file_pdf(ext):
-                return ("pdf", "fa fa-file-pdf")
-            if is_document_file_code(ext):
-                return ("code", "fa fa-file-code")
-            if is_document_file_text(ext):
-                return ("text", "fa fa-file-alt")
-            if is_document_file_sheet(ext):
-                return ("sheet", "fa fa-file-excel")
-            if is_document_file_zip(ext):
-                return ("zip", "fa fa-file-archive")
-            return ("file", "fa fa-file")
-        return ("file", "fa fa-file")
-
-    def get_file_type_display(self):
-        if self.attachment:
-            return self.file_type()[1]
-        return None
-
-    @property
-    def created_on_arrow(self):
-        return arrow.get(self.created_at).humanize()
+        return self.file_name
 
 
 def document_path(self, filename):

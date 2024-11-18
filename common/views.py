@@ -34,8 +34,6 @@ from rest_framework.views import APIView
 
 from accounts.models import Account, Contact, Tags
 from accounts.serializer import AccountSerializer
-from cases.models import Case
-from cases.serializer import CaseSerializer
 
 ##from common.custom_auth import JSONWebTokenAuthentication
 from common import serializer, swagger_params1
@@ -57,10 +55,8 @@ from common.token_generator import account_activation_token
 # from rest_framework_jwt.serializers import jwt_encode_handler
 from common.utils import COUNTRIES, ROLES, jwt_payload_handler
 from contacts.serializer import ContactSerializer
-from leads.models import Lead
-from leads.serializer import LeadSerializer
-from opportunity.models import Opportunity
-from opportunity.serializer import OpportunitySerializer
+
+
 from teams.models import Teams
 from teams.serializer import TeamsSerializer
 
@@ -363,8 +359,7 @@ class ApiHomeView(APIView):
         context["opportunities_count"] = opportunities.count()
         context["accounts"] = AccountSerializer(accounts, many=True).data
         context["contacts"] = ContactSerializer(contacts, many=True).data
-        context["leads"] = LeadSerializer(leads, many=True).data
-        context["opportunities"] = OpportunitySerializer(opportunities, many=True).data
+
         return Response(context, status=status.HTTP_200_OK)
 
 

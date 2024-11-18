@@ -22,7 +22,6 @@ from contacts import swagger_params1
 from contacts.models import Contact, Profile
 from contacts.serializer import *
 from contacts.tasks import send_email_to_assigned_user
-from tasks.serializer import TaskSerializer
 from teams.models import Teams
 
 

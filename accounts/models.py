@@ -69,9 +69,6 @@ class Account(BaseModel):
     status = models.CharField(
         choices=ACCOUNT_STATUS_CHOICE, max_length=64, default="open"
     )
-    lead = models.ForeignKey(
-        "leads.Lead", related_name="account_leads", on_delete=models.SET_NULL, null=True
-    )
     contact_name = models.CharField(
         pgettext_lazy("Name of Contact", "Contact Name"), max_length=120
     )

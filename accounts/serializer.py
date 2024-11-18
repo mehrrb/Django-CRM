@@ -8,7 +8,6 @@ from common.serializer import (
     UserSerializer
 )
 from contacts.serializer import ContactSerializer
-from leads.serializer import LeadSerializer
 from teams.serializer import TeamsSerializer
 
 
@@ -20,7 +19,6 @@ class TagsSerailizer(serializers.ModelSerializer):
 
 class AccountSerializer(serializers.ModelSerializer):
     created_by = UserSerializer()
-    lead = LeadSerializer()
     org = OrganizationSerializer()
     tags = TagsSerailizer(read_only=True, many=True)
     assigned_to = ProfileSerializer(read_only=True, many=True)
@@ -51,7 +49,6 @@ class AccountSerializer(serializers.ModelSerializer):
             "is_active",
             "tags",
             "status",
-            "lead",
             "contact_name",
             "contacts",
             "assigned_to",
@@ -113,7 +110,7 @@ class AccountWriteSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Account
-        fields = ["name","phone", "email", "billing_address_line","billing_street","billing_city", "billing_state", "billing_postcode","billing_country","contacts", "teams", "assigned_to","tags","account_attachment", "website", "status","lead"]
+        fields = ["name","phone", "email", "billing_address_line","billing_street","billing_city", "billing_state", "billing_postcode","billing_country","contacts", "teams", "assigned_to","tags","account_attachment", "website", "status"]
 
 
 class AccountCreateSerializer(serializers.ModelSerializer):

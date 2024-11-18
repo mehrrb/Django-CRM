@@ -14,9 +14,7 @@ from drf_spectacular.views import (
 # from drf_yasg import openapi
 # from drf_yasg.views import get_schema_view
 from rest_framework import permissions
-from wagtail import urls as wagtail_urls
-from wagtail.admin import urls as wagtailadmin_urls
-from wagtail.documents import urls as wagtaildocs_urls
+
 
 app_name = "crm"
 
@@ -30,10 +28,7 @@ urlpatterns = [
     path(
         "logout/", views.LogoutView.as_view(), {"next_page": "/login/"}, name="logout"
     ),
-    path("admin/", include(wagtailadmin_urls)),
-    
     path("django/admin/", admin.site.urls),
-    path("documents/", include(wagtaildocs_urls)),
     path("schema/", SpectacularAPIView.as_view(), name="schema"),
     # Optional UI:
     path(
@@ -46,9 +41,13 @@ urlpatterns = [
         SpectacularRedocView.as_view(url_name="schema"),
         name="redoc",
     ),
-    path("", include(wagtail_urls)),
+    path("", include("common.urls", namespace="common")),
+    path('accounts/', include('accounts.urls', namespace='accounts')),
+    path('contacts/', include('contacts.urls', namespace='contacts')),
+    path('emails/', include('emails.urls', namespace='emails')),
+    path('invoices/', include('invoices.urls', namespace='invoices')),
+    path('teams/', include('teams.urls', namespace='teams')),
 ]
-
 
 if settings.DEBUG:
     from django.conf.urls.static import static
@@ -56,7 +55,5 @@ if settings.DEBUG:
 
     urlpatterns += staticfiles_urlpatterns()
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
-    # urlpatterns = urlpatterns + static(
-    #     settings.MEDIA_URL, document_root=settings.MEDIA_ROOT
-    # )

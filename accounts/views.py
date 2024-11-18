@@ -28,10 +28,8 @@ from accounts.serializer import (
 )
 from teams.serializer import TeamsSerializer
 from accounts.tasks import send_email, send_email_to_assigned_user
-from cases.serializer import CaseSerializer
 from common.models import Attachments, Comment, Profile
-from leads.models import Lead
-from leads.serializer import LeadSerializer
+
 
 #from common.external_auth import CustomDualAuthentication
 from common.serializer import (
@@ -49,10 +47,7 @@ from common.utils import (
 )
 from contacts.models import Contact
 from contacts.serializer import ContactSerializer
-from invoices.serializer import InvoiceSerailizer
-from opportunity.models import SOURCES, STAGES, Opportunity
-from opportunity.serializer import OpportunitySerializer
-from tasks.serializer import TaskSerializer
+from invoices.serializer import InvoiceSerializer
 from teams.models import Teams
 
 
@@ -419,10 +414,7 @@ class AccountDetailView(APIView):
                 "case_priority": PRIORITY_CHOICE,
                 "case_status": STATUS_CHOICE,
                 "comment_permission": comment_permission,
-                "tasks": TaskSerializer(
-                    self.account.accounts_tasks.all(), many=True
-                ).data,
-                "invoices": InvoiceSerailizer(
+                "invoices": InvoiceSerializer(
                     self.account.accounts_invoices.all(), many=True
                 ).data,
                 "emails": EmailSerializer(
