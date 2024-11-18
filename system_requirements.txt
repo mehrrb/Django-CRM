@@ -1,9 +1,21 @@
 sudo apt-get update && apt-get upgrade -y
 
-sudo apt-get install -y curl wget libpq-dev python3-dev gem ruby ruby-dev build-essential libssl-dev libffi-dev python-dev python-virtualenv python-pip git redis-server libtiff5-dev libjpeg8-dev zlib1g-dev libfreetype6-dev liblcms2-dev libwebp-dev libharfbuzz-dev libfribidi-dev tcl8.6-dev tk8.6-dev python-tk
+# Main requirements
+sudo apt-get install -y \
+    python3-dev \
+    libpq-dev \
+    git \
+    redis-server \
+    build-essential \
+    libssl-dev \
+    python-virtualenv \
+    python-pip
 
-sudo gem install sass
+# For working with images (if using profile photos)
+sudo apt-get install -y \
+    libjpeg8-dev \
+    zlib1g-dev \
+    libfreetype6-dev
 
-sudo apt-get install wkhtmltopdf
-
+# For sending emails
 sudo apt-get install postfix

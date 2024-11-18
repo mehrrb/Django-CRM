@@ -8,6 +8,7 @@ from common.serializer import (
 )
 from contacts.models import Contact
 from teams.serializer import TeamsSerializer
+from tasks.models import Task
 
 
 class ContactSerializer(serializers.ModelSerializer):
@@ -119,3 +120,36 @@ class ContactDetailEditSwaggerSerializer(serializers.Serializer):
 
 class ContactCommentEditSwaggerSerializer(serializers.Serializer):
     comment = serializers.CharField()
+
+class TaskSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Task
+        fields = (
+            'id',
+            'title',
+            'status',
+            'priority',
+            'due_date',
+            'created_by',
+            'created_on',
+            'assigned_to',
+            'contact'
+        )
+        read_only_fields = ('id', 'created_by', 'created_on')
+
+    def create(self, validated_data):
+        contact = validated_data.pop('contact', None)
+        created_by = validated_data.pop('created_by', None)
+        
+        task = Task.objects.create(
+            contact=contact,
+            created_by=created_by,
+            **validated_data
+        )
+        return task
+
+    def update(self, instance, validated_data):
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance

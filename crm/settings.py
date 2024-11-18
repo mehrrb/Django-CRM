@@ -53,8 +53,10 @@ INSTALLED_APPS = [
     'accounts',
     'contacts',
     'emails',
-    'invoices',
     'teams',
+    'tasks',
+    'invoices',
+    'reports',
 ]
 
 MIDDLEWARE = [

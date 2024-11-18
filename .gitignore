@@ -1,28 +1,82 @@
+# Python
 *.pyc
-*~
-*.swo
-*.swp
-db.sqlite3
-media
-media-images
-cache
-.idea
-static/CACHE
-.sass-cache/
-main.css
-main.css.map
-ref.css
-ref.css.map
+__pycache__/
+*.pyo
+*.pyd
+.Python
+*.py[cod]
+*$py.class
+.pytest_cache/
 .coverage
-crm/dev_settings\.py
-env
+htmlcov/
+.tox/
+
+# Virtual Environment
+env/
 .env
-docs/build
-celerybeat-schedule
-local_settings.py
-media
-.sass-cache
+venv/
+.venv/
+ENV/
+
+# Database
+db.sqlite3
+*.sqlite3
+*.db
+# PostgreSQL
+*.psql
+*.pgsql
+*.sql
+*.dump
+postgres-data/
+pgdata/
+*.backup
+
+# Media & Static
+media/
+media-images/
+static/CACHE/
+staticfiles/
+.sass-cache/
+*.css.map
+main.css
+ref.css
+
+# IDE & Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# Logs
+*.log
 server.log
-.vscode
-staticfiles
-.venv
+npm-debug.log*
+
+# Cache
+cache/
+.sass-cache/
+.cache/
+
+# Local Settings
+local_settings.py
+dev_settings.py
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Documentation
+docs/build/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
