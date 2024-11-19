@@ -1,5 +1,6 @@
-import arrow
+from django.conf import settings
 from django.db import models
+import arrow
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import pgettext_lazy
@@ -43,10 +44,6 @@ class Account(BaseModel):
     industry = models.CharField(
         _("Industry Type"), max_length=255, choices=INDCHOICES, blank=True, null=True
     )
-    # billing_address = models.ForeignKey(
-    #     Address, related_name='account_billing_address', on_delete=models.CASCADE, blank=True, null=True)
-    # shipping_address = models.ForeignKey(
-    #     Address, related_name='account_shipping_address', on_delete=models.CASCADE, blank=True, null=True)
     billing_address_line = models.CharField(
         _("Address"), max_length=255, blank=True, null=True
     )
@@ -61,9 +58,6 @@ class Account(BaseModel):
     )
     website = models.URLField(_("Website"), blank=True, null=True)
     description = models.TextField(blank=True, null=True)
-    # created_by = models.ForeignKey(
-    #     Profile, related_name="account_created_by", on_delete=models.SET_NULL, null=True
-    # )
     is_active = models.BooleanField(default=False)
     tags = models.ManyToManyField(Tags, blank=True)
     status = models.CharField(
@@ -75,7 +69,10 @@ class Account(BaseModel):
     contacts = models.ManyToManyField(
         "contacts.Contact", related_name="account_contacts"
     )
-    assigned_to = models.ManyToManyField(Profile, related_name="account_assigned_users")
+    assigned_to = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name="account_assigned_users"
+    )
     teams = models.ManyToManyField(Teams, related_name="account_teams")
     org = models.ForeignKey(
         Org,

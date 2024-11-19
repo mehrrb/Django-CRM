@@ -2,11 +2,11 @@
 import uuid
 
 # Django imports
-from common.models import models
+from django.db import models
+from django.conf import settings
 
 
 class TimeAuditModel(models.Model):
-
     """To path when the record was created and last modified"""
 
     created_at = models.DateTimeField(
@@ -20,18 +20,17 @@ class TimeAuditModel(models.Model):
 
 
 class UserAuditModel(models.Model):
-
     """To path when the record was created and last modified"""
 
     created_by = models.ForeignKey(
-        "common.User",
+        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         related_name="%(class)s_created_by",
         verbose_name="Created By",
         null=True,
     )
     updated_by = models.ForeignKey(
-        "common.User",
+        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         related_name="%(class)s_updated_by",
         verbose_name="Last Modified By",
@@ -43,7 +42,6 @@ class UserAuditModel(models.Model):
 
 
 class AuditModel(TimeAuditModel, UserAuditModel):
-
     """To path when the record was created and last modified"""
 
     class Meta:
