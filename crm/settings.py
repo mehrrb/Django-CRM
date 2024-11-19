@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'corsheaders',
     
     # Local apps
+    'users.apps.UsersConfig',
     'common',
     'accounts',
     'contacts',
@@ -86,8 +87,6 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "common.context_processors.common.app_name",
-                # "django_settings_export.settings_export",
-                "wagtail.contrib.settings.context_processors.settings",
             ],
         },
     },
@@ -101,11 +100,11 @@ WSGI_APPLICATION = "crm.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ["DBNAME"],
-        "USER": os.environ["DBUSER"],
-        "PASSWORD": os.environ["DBPASSWORD"],
-        "HOST": os.environ["DBHOST"],
-        "PORT": os.environ["DBPORT"],
+        "NAME": os.environ["DB_NAME"],
+        "USER": os.environ["DB_USER"],
+        "PASSWORD": os.environ["DB_PASSWORD"],
+        "HOST": os.environ["DB_HOST"],
+        "PORT": os.environ["DB_PORT"],
     }
 }
 
@@ -132,7 +131,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # https://docs.djangoproject.com/en/1.10/topics/i18n/
 
 
-TIME_ZONE = "Asia/Kolkata"
+TIME_ZONE = "Asia/Tehran"
 
 USE_I18N = True
 
@@ -140,7 +139,7 @@ USE_TZ = True
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-AUTH_USER_MODEL = "common.User"
+AUTH_USER_MODEL = "users.Users"
 
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 STATIC_URL = "/static/"
@@ -225,19 +224,11 @@ LOGGING = {
 
 APPLICATION_NAME = "bottlecrm"
 
-WAGTAIL_SITE_NAME = "bottlecrm"
-
-WAGTAILADMIN_BASE_URL = "https://bottlecrm.com"
-
 SETTINGS_EXPORT = ["APPLICATION_NAME"]
 
 REST_FRAMEWORK = {
-    "EXCEPTION_HANDLER": "rest_framework.views.exception_handler",
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "common.external_auth.CustomDualAuthentication"
-        # "rest_framework.authentication.SessionAuthentication",
-        # "rest_framework.authentication.BasicAuthentication",
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 10,

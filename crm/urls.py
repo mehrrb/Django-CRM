@@ -47,6 +47,7 @@ urlpatterns = [
     path('emails/', include('emails.urls', namespace='emails')),
     path('invoices/', include('invoices.urls', namespace='invoices')),
     path('teams/', include('teams.urls', namespace='teams')),
+    path('users/', include('users.urls', namespace='users')),
 ]
 
 if settings.DEBUG:

@@ -80,3 +80,7 @@ docs/build/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+#ignore migrations file
+*/migrations/
+*/migrations/*
