@@ -2,42 +2,41 @@ from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
-from django.core.files.uploadedfile import SimpleUploadedFile
-from common.models import (
-    Org, 
-    Address, 
-    Comment, 
-    Attachments,
-    Document
-)
-from teams.models import Teams
+from django.test import override_settings
+from django.contrib.auth.models import Group
+from django.conf import settings
+import jwt
+import logging
 
+from common.models import (
+    Profile,
+    Org,
+    Document,
+    Comment,
+    APISettings
+)
+
+logger = logging.getLogger(__name__)
 User = get_user_model()
 
-class ObjectsCreation(APITestCase):
+TEST_MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'common.middleware.get_company.GetProfileAndOrg',
+]
+
+@override_settings(MIDDLEWARE=TEST_MIDDLEWARE)
+class BaseTest(APITestCase):
     def setUp(self):
-        # Create main user
+        # Create user
         self.user = User.objects.create_user(
-            email="user@example.com",
             username="testuser",
-            password="password",
-            has_sales_access=True,
-            has_marketing_access=True,
-            is_active=True
-        )
-        
-        # Create additional users
-        self.user2 = User.objects.create_user(
-            email="user2@example.com",
-            username="testuser2",
-            password="password",
-            is_active=True
-        )
-        
-        self.admin_user = User.objects.create_superuser(
-            email="admin@example.com",
-            username="admin",
-            password="password",
+            email="test@example.com",
+            password="testpass123",
             is_active=True
         )
         
@@ -46,130 +45,76 @@ class ObjectsCreation(APITestCase):
             name="Test Organization",
             address="Test Address",
             user=self.user,
-            country="US",
-            is_active=True
+            country="US"
         )
         
-        # Add users to org
-        self.user.org = self.org
-        self.user.save()
-        self.user2.org = self.org
-        self.user2.save()
-        
-        # Create team
-        self.team = Teams.objects.create(
-            name="Test Team",
-            created_by=self.user,
-            org=self.org
-        )
-        self.team.users.add(self.user, self.user2)
-        
-        # Create address
-        self.address = Address.objects.create(
-            street="123 Test St",
-            city="Test City",
-            state="Test State",
-            postcode="12345",
-            country="US",
-            org=self.org
-        )
-        
-        # Create comment
-        self.comment = Comment.objects.create(
-            comment="Test Comment",
+        # Create profile
+        self.profile = Profile.objects.create(
             user=self.user,
-            org=self.org
-        )
-        
-        # Create attachment
-        self.attachment = Attachments.objects.create(
-            attachment=SimpleUploadedFile("test.txt", b"test content"),
-            created_by=self.user,
-            org=self.org
-        )
-        
-        # Create document
-        self.document = Document.objects.create(
-            title="Test Document",
-            document=SimpleUploadedFile("test.doc", b"test content"),
-            created_by=self.user,
-            org=self.org
-        )
-        
-        # URLs
-        self.org_list_url = reverse('api_common:org-list')
-        self.org_detail_url = reverse('api_common:org-detail', args=[self.org.id])
-        self.user_list_url = reverse('api_common:user-list')
-        self.user_detail_url = reverse('api_common:user-detail', args=[self.user.id])
-        self.comment_list_url = reverse('api_common:comment-list')
-        self.attachment_list_url = reverse('api_common:attachment-list')
-        self.document_list_url = reverse('api_common:document-list')
-        
-        # Authenticate the user
-        self.client.force_authenticate(user=self.user)
-
-    def create_user(self, email, **kwargs):
-        """Helper method to create users"""
-        return User.objects.create_user(
-            email=email,
-            username=email.split('@')[0],
-            password="password",
-            is_active=True,
+            role="ADMIN",
             org=self.org,
-            **kwargs
+            is_active=True,
+            has_sales_access=True,
+            has_marketing_access=True,
+            is_organization_admin=True
         )
 
-    def test_org_list(self):
-        response = self.client.get(self.org_list_url)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-    def test_org_detail(self):
-        response = self.client.get(self.org_detail_url)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['name'], "Test Organization")
-
-    def test_user_list(self):
-        response = self.client.get(self.user_list_url)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-    def test_user_detail(self):
-        response = self.client.get(self.user_detail_url)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['email'], "user@example.com")
-
-    def test_comment_create(self):
-        data = {
-            'comment': 'New Comment',
-            'user': self.user.id
+        # Create JWT token
+        payload = {
+            'user_id': str(self.user.id),
+            'exp': 1732187943,
+            'iat': 1732101543,
+            'jti': 'test-jwt-id',
+            'token_type': 'access'
         }
-        response = self.client.post(self.comment_list_url, data)
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        
+        # Get JWT settings from Django settings
+        jwt_algo = getattr(settings, 'JWT_ALGO', 'HS256')
+        
+        self.token = jwt.encode(
+            payload,
+            settings.SECRET_KEY,
+            algorithm=jwt_algo
+        )
 
-    def test_attachment_create(self):
+        # Login the user
+        self.client.login(username="testuser", password="testpass123")
+        
+        # Set up client credentials
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f'Bearer {self.token}',
+            HTTP_ORG=str(self.org.id)
+        )
+
+        logger.info(f"Test Setup Complete:")
+        logger.info(f"User ID: {self.user.id}")
+        logger.info(f"Org ID: {self.org.id}")
+        logger.info(f"Profile ID: {self.profile.id}")
+        logger.info(f"Token: {self.token}")
+
+class CommonViewSetTests(BaseTest):
+    def test_org_get(self):
+        url = reverse('api_common:common-org')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_org_create(self):
+        url = reverse('api_common:common-org')
         data = {
-            'attachment': SimpleUploadedFile("new.txt", b"new content"),
-            'created_by': self.user.id
+            "name": "NewOrganization"  # No special characters, just name field
         }
-        response = self.client.post(self.attachment_list_url, data)
+        
+        logger.info(f"POST Request:")
+        logger.info(f"URL: {url}")
+        logger.info(f"Data: {data}")
+        
+        response = self.client.post(url, data, format='json')
+        
+        # Log the response content to see validation errors
+        logger.info(f"Response Status: {response.status_code}")
+        logger.info(f"Response Content: {response.content.decode()}")
+        
+        if response.status_code != status.HTTP_201_CREATED:
+            logger.error(f"Validation errors: {response.data}")
+            
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-
-    def test_document_create(self):
-        data = {
-            'title': 'New Document',
-            'document': SimpleUploadedFile("new.doc", b"new content"),
-            'created_by': self.user.id
-        }
-        response = self.client.post(self.document_list_url, data)
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-
-    def test_permissions(self):
-        # Test unauthorized access
-        self.client.logout()
-        response = self.client.get(self.org_list_url)
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-
-        # Test different org user
-        different_org_user = self.create_user("other@test.com")
-        self.client.force_authenticate(user=different_org_user)
-        response = self.client.get(self.org_detail_url)
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

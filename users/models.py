@@ -14,11 +14,13 @@ class Users(AbstractUser):
         null=True,
         blank=True
     )
+    has_sales_access = models.BooleanField(default=False)
+    has_marketing_access = models.BooleanField(default=False)
     
     objects = UserManagement()
     
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['password', 'username']
+    REQUIRED_FIELDS = ['username', 'password']
     
     class Meta:
         verbose_name = _('user')

@@ -33,6 +33,7 @@ pgdata/
 
 # Media & Static
 media/
+static/
 media-images/
 static/CACHE/
 staticfiles/

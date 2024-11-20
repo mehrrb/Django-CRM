@@ -85,15 +85,18 @@ class Address(BaseModel):
 def generate_unique_key():
     return str(uuid.uuid4())
 
-class Org(BaseModel):
-    name = models.CharField(max_length=100, blank=True, null=True)
-    api_key = models.TextField(
-        default=generate_unique_key, unique=True, editable=False
-    )
-    is_active = models.BooleanField(default=True)
-    # address = models.TextField(blank=True, null=True)
-    # user_limit = models.IntegerField(default=5)
-    # country = models.CharField(max_length=3, choices=COUNTRIES, blank=True, null=True)
+from django.db import models
+from users.models import Users as User
+
+
+class Org(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255, default="default name")
+    address = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name="org_user")
+    country = models.CharField(max_length=100, null=True, blank=True)
+    api_key = models.CharField(max_length=100, unique=True, null=True, blank=True)
 
     class Meta:
         verbose_name = "Organization"
@@ -151,7 +154,20 @@ class Profile(BaseModel):
 
 
 class Comment(BaseModel):
-    comment = models.TextField()
+    comment = models.CharField(max_length=255)
+    user = models.ForeignKey(
+        User,
+        related_name="user_comments",
+        on_delete=models.CASCADE,
+        null=True,
+    )
+    org = models.ForeignKey(
+        Org, 
+        related_name="org_comments",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
     account = models.ForeignKey(
         'accounts.Account',
         blank=True,
@@ -179,7 +195,7 @@ class Comment(BaseModel):
 
 class Attachments(BaseModel):
     file_name = models.CharField(max_length=60)
-    attachment = models.FileField(max_length=1001, upload_to='attachments/%Y/%m/')
+    attachment = models.FileField(max_length=1001, upload_to='attachments/')
     account = models.ForeignKey(
         'accounts.Account',
         blank=True,

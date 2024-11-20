@@ -1,75 +1,60 @@
 import jwt
+import logging
 from django.conf import settings
-from django.contrib.auth import logout
-from django.core.exceptions import ValidationError,PermissionDenied
-from rest_framework import status
-from rest_framework.response import Response
-from crum import get_current_user
-from django.utils.functional import SimpleLazyObject
+from django.core.exceptions import PermissionDenied
+from common.models import Profile
 
-from common.models import Org, Profile, User
+logger = logging.getLogger(__name__)
 
-
-# def set_profile_request(request, org, token):
-#     # we are decoding the token
-#     decoded = jwt.decode(token, (settings.SECRET_KEY), algorithms=[settings.JWT_ALGO])
-
-#     request.user = User.objects.get(id=decoded["user_id"])
-
-#     if request.user:
-#         request.profile = Profile.objects.get(
-#             user=request.user, org=org, is_active=True
-#         )
-#         request.profile.role = "ADMIN"
-#         request.profile.save()
-#         if request.profile is None:
-#             logout(request)
-#             return Response(
-#                 {"error": False},
-#                 status=status.HTTP_200_OK,
-            # )
-
-def get_actual_value(request):
-    if request.user is None:
-        return None
-
-    return request.user #here should have value, so any code using request.user will work
-
-class GetProfileAndOrg(object):
+class GetProfileAndOrg:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        self.process_request(request)
-        return self.get_response(request)
-
-    def process_request(self, request):
-        try :
+        try:
             request.profile = None
-            user_id = None
-            # here I am getting the the jwt token passing in header
-            if request.headers.get("Authorization"):
-                token1 = request.headers.get("Authorization")
-                token = token1.split(" ")[1]  # getting the token value
-                decoded = jwt.decode(token, (settings.SECRET_KEY), algorithms=[settings.JWT_ALGO])
-                user_id = decoded['user_id']
-            api_key = request.headers.get('Token')  # Get API key from request query params
-            if api_key:
+            
+            # Log incoming request details
+            logger.info("Middleware Processing Request:")
+            logger.info(f"Headers: {request.headers}")
+            
+            # Get JWT token
+            auth_header = request.headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                token = auth_header.split(' ')[1]
                 try:
-                    organization = Org.objects.get(api_key=api_key)
-                    api_key_user = organization
-                    request.META['org'] = api_key_user.id
-                    profile = Profile.objects.filter(org=api_key_user, role="ADMIN").first()
-                    user_id = profile.user.id
-                except Org.DoesNotExist:
-                    raise AuthenticationFailed('Invalid API Key')
-            if user_id is not None:
-                if request.headers.get("org"):
-                    profile = Profile.objects.get(
-                        user_id=user_id, org=request.headers.get("org"), is_active=True
+                    # Decode token
+                    decoded = jwt.decode(
+                        token,
+                        settings.SECRET_KEY,
+                        algorithms=[settings.JWT_ALGO]
                     )
-                    if profile:
+                    logger.info(f"Decoded token: {decoded}")
+                    
+                    user_id = decoded.get('user_id')
+                    org_id = request.headers.get('org')
+                    
+                    logger.info(f"Looking for profile with user_id={user_id}, org_id={org_id}")
+                    
+                    if user_id and org_id:
+                        profile = Profile.objects.get(
+                            user_id=user_id,
+                            org_id=org_id,
+                            is_active=True
+                        )
                         request.profile = profile
-        except :
-             print('test1')
-             raise PermissionDenied()
+                        logger.info(f"Found and set profile: {profile}")
+                    
+                except jwt.InvalidTokenError as e:
+                    logger.error(f"Token validation error: {str(e)}")
+                except Profile.DoesNotExist:
+                    logger.error("Profile not found")
+                except Exception as e:
+                    logger.error(f"Unexpected error: {str(e)}")
+            
+            response = self.get_response(request)
+            return response
+            
+        except Exception as e:
+            logger.error(f"Middleware error: {str(e)}")
+            return self.get_response(request)

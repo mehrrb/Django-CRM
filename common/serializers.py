@@ -17,6 +17,7 @@ from common.models import (
     Profile,
     User,
 )
+from users.serializers import UserSerializer
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -30,23 +31,18 @@ class SocialLoginSerializer(serializers.Serializer):
 
 
 class CommentSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
     class Meta:
         model = Comment
         fields = (
             "id",
             "comment",
-            "commented_on",
-            "commented_by",
-            "account",
-            "lead",
-            "opportunity",
+            "user",
+            "created_at",
             "contact",
-            "case",
-            "task",
-            "invoice",
-            "event",
-            "profile",
+            "org"
         )
+        read_only_fields = ["user", "created_at", "org"]
 
 
 class LeadCommentSerializer(serializers.ModelSerializer):
@@ -66,7 +62,6 @@ class OrgProfileCreateSerializer(serializers.ModelSerializer):
     """
     It is for creating organization
     """
-
     name = serializers.CharField(max_length=255)
 
     class Meta:
@@ -90,11 +85,8 @@ class OrgProfileCreateSerializer(serializers.ModelSerializer):
 
 class ShowOrganizationListSerializer(serializers.ModelSerializer):
     """
-    we are using it for show orjanization list
+    Serializer for showing organization details
     """
-
-    org = OrganizationSerializer()
-
     class Meta:
         model = Profile
         fields = (
@@ -105,6 +97,21 @@ class ShowOrganizationListSerializer(serializers.ModelSerializer):
             "is_organization_admin",
             "org",
         )
+
+    def to_representation(self, instance):
+        """
+        Handle both Profile and Org instances
+        """
+        if isinstance(instance, Org):
+            return {
+                "role": None,
+                "alternate_phone": None,
+                "has_sales_access": None,
+                "has_marketing_access": None,
+                "is_organization_admin": None,
+                "org": OrganizationSerializer(instance).data
+            }
+        return super().to_representation(instance)
 
 
 class BillingAddressSerializer(serializers.ModelSerializer):
@@ -253,10 +260,10 @@ class DocumentCreateSerializer(serializers.ModelSerializer):
                 .exists()
             ):
                 raise serializers.ValidationError(
-                    "Document with this Title already exists"
+                    "Document with this Title already exists"
                 )
         if Document.objects.filter(title__iexact=title, org=self.org).exists():
-            raise serializers.ValidationError("Document with this Title already exists")
+            raise serializers.ValidationError("Document with this Title already exists")
         return title
 
     class Meta:

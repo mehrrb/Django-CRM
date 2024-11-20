@@ -4,7 +4,8 @@ from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
 from users.models import Users
 from teams.models import Teams
-from accounts.models import Account, Tags, Email
+from emails.models import Email
+from accounts.models import Account, Tags
 from common.models import Comment, Attachments
 from accounts.tasks import (
     send_email_to_assigned_user,

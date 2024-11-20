@@ -1,10 +1,11 @@
 from rest_framework import serializers
 from .models import Contact
+from common.models import Comment  # Add this import
 from common.serializers import (
     UserSerializer,
     ProfileSerializer,
     AttachmentSerializer,
-    CommentSerializer,
+    CommentSerializer,  # We'll use this instead of defining our own
     BillingAddressSerializer,
     OrganizationSerializer
 )
@@ -12,63 +13,50 @@ from teams.serializers import TeamsSerializer
 from tasks.serializers import TaskSerializer
 
 class ContactSerializer(serializers.ModelSerializer):
-    created_by = ProfileSerializer(read_only=True)
-    org = OrganizationSerializer(read_only=True)
-    teams = TeamsSerializer(many=True, read_only=True)
-    assigned_to = ProfileSerializer(many=True, read_only=True)
-    contact_attachments = AttachmentSerializer(many=True, read_only=True)
-    address = BillingAddressSerializer(read_only=True)
-    
     class Meta:
         model = Contact
         fields = (
             'id',
             'first_name',
-            'last_name',
-            'org',
+            'last_name', 
             'primary_email',
             'secondary_email',
             'mobile_number',
             'secondary_number',
             'department',
             'title',
-            'created_by',
-            'created_at',
-            'is_active',
-            'address',
             'description',
-            'linked_in_url',
-            'facebook_url',
-            'twitter_username',
-            'contact_attachments',
-            'assigned_to',
-            'teams',
             'status',
             'source',
-            'modified_by',
-            'modified_at',
-            'company_name'
-        )
-        read_only_fields = (
-            'id',
+            'company_name',
             'created_by',
             'created_at',
-            'modified_by',
-            'modified_at',
-            'org'
+            'is_active'
         )
+        read_only_fields = ('created_by', 'created_at', 'is_active')
+
+    def validate_mobile_number(self, value):
+        """Additional validation for mobile number"""
+        if value:
+            import re
+            pattern = r'^\+?1?\d{9,15}$'
+            if not re.match(pattern, value):
+                raise serializers.ValidationError('Invalid phone number format')
+        return value
 
 class ContactCreateSerializer(serializers.ModelSerializer):
     address = BillingAddressSerializer(required=False)
     assigned_to = serializers.ListField(
         child=serializers.IntegerField(),
-        required=False
+        required=False,
+        allow_empty=True
     )
     teams = serializers.ListField(
         child=serializers.IntegerField(),
-        required=False
+        required=False,
+        allow_empty=True
     )
-    contact_attachment = serializers.FileField(required=False)
+    contact_attachment = serializers.FileField(required=False, allow_null=True)
 
     class Meta:
         model = Contact
@@ -82,9 +70,6 @@ class ContactCreateSerializer(serializers.ModelSerializer):
             'department',
             'title',
             'description',
-            'linked_in_url',
-            'facebook_url',
-            'twitter_username',
             'status',
             'source',
             'company_name',
@@ -93,6 +78,18 @@ class ContactCreateSerializer(serializers.ModelSerializer):
             'teams',
             'contact_attachment'
         )
+
+    def validate(self, attrs):
+        # Remove None values for optional fields
+        cleaned_data = {k: v for k, v in attrs.items() if v is not None}
+        
+        # Ensure required fields are present
+        required_fields = ['first_name', 'last_name', 'primary_email']
+        for field in required_fields:
+            if field not in cleaned_data:
+                raise serializers.ValidationError(f"{field} is required")
+                
+        return cleaned_data
 
     def validate_primary_email(self, value):
         if value:
@@ -106,13 +103,13 @@ class ContactCreateSerializer(serializers.ModelSerializer):
         return value
 
 class ContactDetailSerializer(ContactSerializer):
-    comments = CommentSerializer(many=True, read_only=True)
-    tasks = TaskSerializer(many=True, read_only=True, source='contacts_tasks')
+    assigned_to = ProfileSerializer(many=True, read_only=True)
+    teams = TeamsSerializer(many=True, read_only=True)
     
     class Meta(ContactSerializer.Meta):
         fields = ContactSerializer.Meta.fields + (
-            'comments',
-            'tasks'
+            'assigned_to',
+            'teams'
         )
 
 class ContactCommentSerializer(serializers.Serializer):

@@ -2,17 +2,35 @@ import arrow
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from phonenumber_field.modelfields import PhoneNumberField
+from django.core.exceptions import ValidationError
 
 from common.models import Address, Org, Profile
 from common.base import BaseModel
 from common.utils import COUNTRIES
 from teams.models import Teams
 
+def validate_phone_number(value):
+    """Validate phone number format for Iran"""
+    import re
+    pattern = r'^\+98[0-9]{10}$|^0[0-9]{10}$'
+    if not re.match(pattern, value):
+        raise ValidationError('Invalid phone number. Valid formats: +989123456789 or 09123456789')
+
 
 class Contact(BaseModel):
-    salutation = models.CharField(
-        _("Salutation"), max_length=255, default="", blank=True
+    STATUS_CHOICES = (
+        ('new', _('New')),
+        ('active', _('Active')), 
+        ('inactive', _('Inactive')),
     )
+
+    SOURCE_CHOICES = (
+        ('website', _('Website')),
+        ('referral', _('Referral')),
+        ('other', _('Other')),
+    )
+
+    salutation = models.CharField(_("Salutation"), max_length=255, default="", blank=True)
     first_name = models.CharField(_("First name"), max_length=255)
     last_name = models.CharField(_("Last name"), max_length=255)
     date_of_birth = models.DateField(null=True, blank=True)
@@ -20,8 +38,13 @@ class Contact(BaseModel):
     title = models.CharField(_("Title"), max_length=255, default="", blank=True)
     primary_email = models.EmailField(unique=True)
     secondary_email = models.EmailField(default="", blank=True)
-    mobile_number = PhoneNumberField(null=True, unique=True)
-    secondary_number = PhoneNumberField(null=True,blank=True)
+    mobile_number = models.CharField(
+        max_length=20,
+        validators=[validate_phone_number],
+        null=True,
+        unique=True
+    )
+    secondary_number = PhoneNumberField(null=True, blank=True)
     department = models.CharField(_("Department"), max_length=255, null=True)
     language = models.CharField(_("Language"), max_length=255, null=True)
     do_not_call = models.BooleanField(default=False)
@@ -33,17 +56,26 @@ class Contact(BaseModel):
         null=True,
     )
     description = models.TextField(blank=True, null=True)
-    linked_in_url = models.URLField(blank=True, null=True)
-    facebook_url = models.URLField(blank=True, null=True)
-    twitter_username = models.CharField(max_length=255, blank=True,null=True)
-    # created_by = models.ForeignKey(
-    #     Profile, related_name="contact_created_by", on_delete=models.SET_NULL, null=True
-    # )
     is_active = models.BooleanField(default=False)
     assigned_to = models.ManyToManyField(Profile, related_name="contact_assigned_users")
     teams = models.ManyToManyField(Teams, related_name="contact_teams")
     org = models.ForeignKey(Org, on_delete=models.SET_NULL, null=True, blank=True)
     country = models.CharField(max_length=3, choices=COUNTRIES, blank=True, null=True)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='new'
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default='website'
+    )
+    company_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True
+    )
 
     class Meta:
         verbose_name = "Contact"
@@ -52,7 +84,7 @@ class Contact(BaseModel):
         ordering = ("-created_at",)
 
     def __str__(self):
-        return self.first_name
+        return f"{self.first_name} {self.last_name}"
     
     @property
     def created_on_arrow(self):
@@ -61,7 +93,6 @@ class Contact(BaseModel):
     @property
     def created_on(self):
         return self.created_at
-
 
     @property
     def get_team_users(self):

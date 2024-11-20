@@ -1,17 +1,21 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.pagination import LimitOffsetPagination
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from rest_framework.exceptions import PermissionDenied
+from django.utils import timezone
 
 from .models import Contact
 from .serializers import (
     ContactSerializer,
     ContactCreateSerializer,
     ContactDetailSerializer,
-    TaskSerializer
+    TaskSerializer,
+    ContactAttachmentSerializer,
+    ContactCommentSerializer
 )
 from common.models import Comment, Attachments, Profile
 from common.serializers import (
@@ -34,7 +38,7 @@ class ContactViewSet(viewsets.ModelViewSet):
         # Filter based on user role
         if not self.request.profile.is_admin:
             queryset = queryset.filter(
-                Q(created_by=self.request.profile) | 
+                Q(created_by=self.request.profile.user) |  # Changed from self.request.profile
                 Q(assigned_to=self.request.profile)
             ).distinct()
 
@@ -65,20 +69,22 @@ class ContactViewSet(viewsets.ModelViewSet):
         return ContactSerializer
 
     def perform_create(self, serializer):
-        # Create address first
-        address_serializer = BillingAddressSerializer(data=self.request.data)
-        if address_serializer.is_valid():
-            address = address_serializer.save()
-        else:
-            raise serializers.ValidationError(address_serializer.errors)
+        # Create address first if provided
+        address = None
+        if self.request.data.get('address'):
+            address_serializer = BillingAddressSerializer(data=self.request.data.get('address'))
+            if address_serializer.is_valid():
+                address = address_serializer.save()
+            else:
+                raise serializers.ValidationError(address_serializer.errors)
 
         contact = serializer.save(
             org=self.request.profile.org,
-            created_by=self.request.profile,
+            created_by=self.request.user,  # Changed from self.request.profile
             address=address
         )
         
-        # Add teams
+        # Add teams if provided
         if self.request.data.get('teams'):
             teams = Teams.objects.filter(
                 id__in=self.request.data.get('teams'),
@@ -86,7 +92,7 @@ class ContactViewSet(viewsets.ModelViewSet):
             )
             contact.teams.add(*teams)
 
-        # Add assigned users and send emails
+        # Add assigned users if provided
         if self.request.data.get('assigned_to'):
             profiles = Profile.objects.filter(
                 id__in=self.request.data.get('assigned_to'),
@@ -97,81 +103,48 @@ class ContactViewSet(viewsets.ModelViewSet):
             recipients = list(profiles.values_list('id', flat=True))
             send_email_to_assigned_user.delay(recipients, contact.id)
 
-        # Handle attachments
-        if self.request.FILES.get('contact_attachment'):
-            Attachments.objects.create(
-                created_by=self.request.profile.user,
-                file_name=self.request.FILES.get('contact_attachment').name,
-                contact=contact,
-                attachment=self.request.FILES.get('contact_attachment'),
-                org=self.request.profile.org
-            )
-
     def perform_update(self, serializer):
         contact = self.get_object()
         
-        # Update address
-        address_serializer = BillingAddressSerializer(
-            instance=contact.address,
-            data=self.request.data
-        )
-        if address_serializer.is_valid():
-            address = address_serializer.save()
+        # Update address if provided
+        if self.request.data.get('address'):
+            if contact.address:
+                address_serializer = BillingAddressSerializer(
+                    contact.address,
+                    data=self.request.data.get('address')
+                )
+            else:
+                address_serializer = BillingAddressSerializer(
+                    data=self.request.data.get('address')
+                )
+                
+            if address_serializer.is_valid():
+                address = address_serializer.save()
+            else:
+                raise serializers.ValidationError(address_serializer.errors)
         else:
-            raise serializers.ValidationError(address_serializer.errors)
+            address = contact.address
 
         contact = serializer.save(address=address)
-        
-        # Update teams
-        if self.request.data.get('teams'):
-            contact.teams.clear()
-            teams = Teams.objects.filter(
-                id__in=self.request.data.get('teams'),
-                org=self.request.profile.org
-            )
-            contact.teams.add(*teams)
 
-        # Update assigned users
-        if self.request.data.get('assigned_to'):
-            old_assigned = set(contact.assigned_to.values_list('id', flat=True))
-            contact.assigned_to.clear()
-            
-            profiles = Profile.objects.filter(
-                id__in=self.request.data.get('assigned_to'),
-                org=self.request.profile.org
-            )
-            contact.assigned_to.add(*profiles)
-            
-            # Send email to new users
-            new_assigned = set(profiles.values_list('id', flat=True))
-            recipients = list(new_assigned - old_assigned)
-            if recipients:
-                send_email_to_assigned_user.delay(recipients, contact.id)
-
-    def destroy(self, request, *args, **kwargs):
-        contact = self.get_object()
-        
-        if not request.profile.is_admin and request.profile != contact.created_by:
-            return Response(
-                {'error': 'Permission denied'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-            
-        if contact.address:
-            contact.address.delete()
-        contact.delete()
-        
-        return Response(status=status.HTTP_204_NO_CONTENT)
+    def perform_destroy(self, instance):
+        if not self.request.profile.role == "ADMIN":
+            raise PermissionDenied("You don't have permission to delete this contact.")
+        instance.delete()
 
     @action(detail=True, methods=['post'])
     def add_comment(self, request, pk=None):
         contact = self.get_object()
-        serializer = CommentSerializer(data=request.data)
+        from contacts.serializers import ContactCommentSerializer
+        serializer = ContactCommentSerializer(data=request.data)
+        
         if serializer.is_valid():
-            comment = serializer.save(
-                commented_by=request.profile,
+            comment = Comment.objects.create(
+                comment=serializer.validated_data['comment'],
+                user=request.profile.user,
                 contact=contact,
-                org=request.profile.org
+                org=request.profile.org,
+                created_at=timezone.now()
             )
             return Response(
                 CommentSerializer(comment).data,
@@ -190,12 +163,21 @@ class ContactViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
-    def add_attachment(self, request, pk=None):
+    def attachments(self, request, pk=None):
         contact = self.get_object()
-        serializer = AttachmentSerializer(data=request.data)
-        if serializer.is_valid():
-            attachment = serializer.save(
-                created_by=request.profile,
+        
+        if 'attachment' not in request.FILES:
+            print("Files in request:", request.FILES)  # For debugging
+            return Response(
+                {'error': 'No attachment provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            file = request.FILES['attachment']
+            attachment = Attachments.objects.create(
+                attachment=file,
+                created_by=request.profile.user,
                 contact=contact,
                 org=request.profile.org
             )
@@ -203,10 +185,12 @@ class ContactViewSet(viewsets.ModelViewSet):
                 AttachmentSerializer(attachment).data,
                 status=status.HTTP_201_CREATED
             )
-        return Response(
-            serializer.errors,
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        except Exception as e:
+            print("Error creating attachment:", str(e))  # For debugging
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
     @action(detail=True, methods=['delete'])
     def remove_attachment(self, request, pk=None):

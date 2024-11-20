@@ -261,7 +261,23 @@ class DocumentViewSet(viewsets.ModelViewSet):
             {"message": "Document deleted successfully"},
             status=status.HTTP_204_NO_CONTENT
         )
+    @action(detail=True, methods=['post'])
+    def share(self, request, pk=None):
+        document = self.get_object()
+        shared_to = request.data.get("shared_to", [])
+        comment = request.data.get("comment", "")
 
+        document.shared_to.add(*shared_to)
+
+        if comment:
+            comment.objects.create(
+                comment=comment,
+                created_by=request.profile,
+                document=document
+            )
+        return Response({"status": "Document shared successfully"})
+    
+    
 class APISettingsViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = APISettingsSerializer
@@ -316,3 +332,9 @@ class APISettingsViewSet(viewsets.ModelViewSet):
             {"message": "API Settings deleted successfully"},
             status=status.HTTP_204_NO_CONTENT
         )
+    @action(detail=True, methods=['post'])
+    def update_tags(self, request, pk=None):
+        api_setting = self.get_object()
+        api_setting.tags = request.data["tags"]
+        api_setting.save()
+        return Response({"status": "tags updated successfully"})

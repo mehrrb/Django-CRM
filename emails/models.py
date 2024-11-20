@@ -15,7 +15,7 @@ class Email(BaseModel):
         Contact,
         related_name='received_emails'
     )
-    message_subject = models.TextField(null=True)
+    message_subject = models.TextField(null=True,)
     message_body = models.TextField(null=True)
 
     is_draft = models.BooleanField(default=False)
