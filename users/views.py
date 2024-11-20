@@ -1,57 +1,73 @@
-from django.shortcuts import render
-from rest_framework.viewsets import ModelViewSet
-from rest_framework.views import APIView
-from django.contrib.auth import authenticate, login, logout
-from .models import Users
-from .serializers import UserSerializer, LoginSerializer
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.response import Response
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework import status
+from drf_spectacular.utils import extend_schema
+from django.contrib.auth import login, logout
 from django.core.exceptions import ObjectDoesNotExist
 import logging
 import traceback
 
+from .models import Users
+from .serializers import (
+    UserSerializer,
+    UserCreateSerializer,
+    LoginSerializer,
+    UserDetailSerializer
+)
 
-class UsersView(ModelViewSet):
+class UserViewSet(viewsets.ModelViewSet):
     queryset = Users.objects.all()
-    serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
     
-    def get_permissions(self):
+    def get_serializer_class(self):
         if self.action == 'create':
+            return UserCreateSerializer
+        elif self.action == 'retrieve':
+            return UserDetailSerializer
+        return UserSerializer
+
+    def get_permissions(self):
+        if self.action in ['create', 'login']:
             return [AllowAny()]
         return [IsAuthenticated()]
 
+    @extend_schema(tags=["Users"])
     def create(self, request, *args, **kwargs):
-        data = request.data
-        ser_data = UserSerializer(data=data)
-        if ser_data.is_valid():
-            email = ser_data.validated_data['email']
-            password = ser_data.validated_data['password']
-            
-            user = Users(
-                email = email,            
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            return Response(
+                {
+                    "error": False,
+                    "message": "User created successfully",
+                    "user": UserSerializer(user).data
+                },
+                status=status.HTTP_201_CREATED
             )
-            user.set_password(password)
-            user.save()
-            return Response({"info" : "successfully created"}, status=status.HTTP_201_CREATED)
-        else:
-            return Response(ser_data.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    
-    
+        return Response(
+            {
+                "error": True,
+                "errors": serializer.errors
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-class LoginView(APIView):
-    def post(self, request):
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
+    def login(self, request):
         try:
             email = request.data.get('email')
             password = request.data.get('password')
             
             if not email or not password:
                 return Response(
-                    {"error": "Both email and password are required"}, 
+                    {
+                        "error": True,
+                        "errors": "Both email and password are required"
+                    }, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
@@ -59,29 +75,42 @@ class LoginView(APIView):
                 user = Users.objects.get(email=email)
             except ObjectDoesNotExist:
                 return Response(
-                    {"error": "User not found"}, 
+                    {
+                        "error": True,
+                        "errors": "User not found"
+                    }, 
                     status=status.HTTP_404_NOT_FOUND
                 )
                 
             if not user.check_password(password):
                 return Response(
-                    {"error": "Invalid password"}, 
+                    {
+                        "error": True,
+                        "errors": "Invalid password"
+                    }, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            ser_user = LoginSerializer(data=request.data)
-            if not ser_user.is_valid():
+            serializer = LoginSerializer(data=request.data)
+            if not serializer.is_valid():
                 return Response(
-                    ser_user.errors, 
+                    {
+                        "error": True,
+                        "errors": serializer.errors
+                    }, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
                 
             token = RefreshToken.for_user(user)
             response = {
-                **ser_user.data,
-                'access_token': str(token.access_token),
-                'refresh_token': str(token),
-                'is_superuser': user.is_superuser
+                "error": False,
+                "data": {
+                    **serializer.data,
+                    'access_token': str(token.access_token),
+                    'refresh_token': str(token),
+                    'is_superuser': user.is_superuser,
+                    'user': UserSerializer(user).data
+                }
             }
             
             login(request, user)
@@ -90,19 +119,59 @@ class LoginView(APIView):
         except Exception as e:
             logging.error(f"Login error: {str(e)}\n{traceback.format_exc()}")
             return Response(
-                {"error": "An unexpected error occurred"}, 
+                {
+                    "error": True,
+                    "errors": "An unexpected error occurred"
+                }, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
-#    
-# def post(request):
-
-
-class LogoutView(APIView):
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [IsAuthenticated]
-    
-    def post(self,request):
+    @action(detail=False, methods=['post'])
+    def logout(self, request):
         logout(request)
-        return Response({'message': 'Successfully logged out.'}, status=status.HTTP_200_OK)
+        return Response(
+            {
+                'error': False,
+                'message': 'Successfully logged out.'
+            },
+            status=status.HTTP_200_OK
+        )
+
+    @action(detail=False, methods=['get'])
+    def me(self, request):
+        """Get current user details"""
+        serializer = UserDetailSerializer(request.user)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def change_password(self, request, pk=None):
+        user = self.get_object()
+        old_password = request.data.get('old_password')
+        new_password = request.data.get('new_password')
+        
+        if not old_password or not new_password:
+            return Response(
+                {
+                    "error": True,
+                    "errors": "Both old and new passwords are required"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        if not user.check_password(old_password):
+            return Response(
+                {
+                    "error": True,
+                    "errors": "Invalid old password"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        user.set_password(new_password)
+        user.save()
+        return Response(
+            {
+                "error": False,
+                "message": "Password changed successfully"
+            }
+        )

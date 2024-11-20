@@ -12,12 +12,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import Account
-from accounts.serializer import AccountSerializer
+from accounts.serializers import AccountSerializer
 from common.models import Attachments, Comment, User
 
 #from common.external_auth import CustomDualAuthentication
-from common.serializer import (
-    AttachmentsSerializer,
+from common.serializers import (
+    AttachmentSerializer,
     BillingAddressSerializer,
     CommentSerializer,
     UserSerializer,
@@ -460,7 +460,7 @@ class InvoiceDetailView(APIView):
         comments = Comment.objects.filter(invoice=self.invoice).order_by("-id")
         context.update(
             {
-                "attachments": AttachmentsSerializer(attachments, many=True).data,
+                "attachments": AttachmentSerializer(attachments, many=True).data,
                 "comments": CommentSerializer(comments, many=True).data,
                 "invoice_history": InvoiceHistorySerializer(
                     self.invoice.invoice_history.all(), many=True
@@ -531,7 +531,7 @@ class InvoiceDetailView(APIView):
         context.update(
             {
                 "invoice_obj": InvoiceSerailizer(self.invoice_obj).data,
-                "attachments": AttachmentsSerializer(attachments, many=True).data,
+                "attachments": AttachmentSerializer(attachments, many=True).data,
                 "comments": CommentSerializer(comments, many=True).data,
             }
         )

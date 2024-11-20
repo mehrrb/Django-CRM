@@ -1,139 +1,108 @@
-from django.shortcuts import render, get_object_or_404, redirect
-from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 from django.core.mail import EmailMessage
-from django.template.loader import render_to_string
 from django.conf import settings
+from django.shortcuts import get_object_or_404
+from .models import Email
+from .serializers import EmailSerializer
 
-from emails.models import Email
-from emails.forms import EmailForm
-
-@login_required
-def emails_list(request):
-    emails = Email.objects.filter(user=request.user)
-    context = {'emails': emails}
-    return render(request, 'emails/emails_list.html', context)
-
-@login_required
-def email_compose(request):
-    form = EmailForm()
-    context = {'form': form}
-    return render(request, 'emails/email_compose.html', context)
-
-@login_required
-def email_send(request):
-    if request.method == 'POST':
-        form = EmailForm(request.POST)
-        if form.is_valid():
-            email = form.save(commit=False)
-            email.user = request.user
-            email.save()
-            
+class EmailViewSet(viewsets.ModelViewSet):
+    serializer_class = EmailSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        queryset = Email.objects.filter(user=self.request.user)
+        if self.action == 'sent':
+            return queryset.filter(is_sent=True)
+        elif self.action == 'trash':
+            return queryset.filter(is_trash=True)
+        elif self.action == 'draft':
+            return queryset.filter(is_draft=True)
+        elif self.action == 'important':
+            return queryset.filter(is_important=True)
+        return queryset
+    
+    def perform_create(self, serializer):
+        email = serializer.save(user=self.request.user)
+        if not email.is_draft:
             # Send actual email
-            subject = email.subject
-            message = email.message
-            from_email = settings.DEFAULT_FROM_EMAIL
-            recipient_list = [email.to_email]
-            
-            email_message = EmailMessage(subject, message, from_email, recipient_list)
+            email_message = EmailMessage(
+                subject=email.subject,
+                body=email.message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[email.to_email]
+            )
             email_message.send()
-            
-            return redirect('emails:email_sent')
-    return redirect('emails:compose')
-
-@login_required
-def email_sent(request):
-    emails = Email.objects.filter(user=request.user, is_sent=True)
-    context = {'emails': emails}
-    return render(request, 'emails/email_sent.html', context)
-
-@login_required
-def email_move_to_trash(request):
-    if request.method == 'POST':
-        email_id = request.POST.get('email_id')
-        email = get_object_or_404(Email, id=email_id, user=request.user)
+            email.is_sent = True
+            email.save()
+    
+    @action(detail=False, methods=['get'])
+    def sent(self, request):
+        return self.list(request)
+    
+    @action(detail=False, methods=['get'])
+    def trash(self, request):
+        return self.list(request)
+    
+    @action(detail=False, methods=['get'])
+    def draft(self, request):
+        return self.list(request)
+    
+    @action(detail=False, methods=['get'])
+    def important(self, request):
+        return self.list(request)
+    
+    @action(detail=True, methods=['post'])
+    def move_to_trash(self, request, pk=None):
+        email = self.get_object()
         email.is_trash = True
         email.save()
-        return JsonResponse({'status': 'success'})
-    return JsonResponse({'status': 'error'})
-
-@login_required
-def email_delete(request):
-    if request.method == 'POST':
-        email_id = request.POST.get('email_id')
-        email = get_object_or_404(Email, id=email_id, user=request.user)
-        email.delete()
-        return JsonResponse({'status': 'success'})
-    return JsonResponse({'status': 'error'})
-
-@login_required
-def email_trash(request):
-    emails = Email.objects.filter(user=request.user, is_trash=True)
-    context = {'emails': emails}
-    return render(request, 'emails/email_trash.html', context)
-
-@login_required
-def email_draft(request):
-    emails = Email.objects.filter(user=request.user, is_draft=True)
-    context = {'emails': emails}
-    return render(request, 'emails/email_draft.html', context)
-
-@login_required
-def email_draft_delete(request):
-    if request.method == 'POST':
-        email_id = request.POST.get('email_id')
-        email = get_object_or_404(Email, id=email_id, user=request.user, is_draft=True)
-        email.delete()
-        return JsonResponse({'status': 'success'})
-    return JsonResponse({'status': 'error'})
-
-@login_required
-def email_imp_list(request):
-    emails = Email.objects.filter(user=request.user, is_important=True)
-    context = {'emails': emails}
-    return render(request, 'emails/email_important.html', context)
-
-@login_required
-def email_mark_as_important(request):
-    if request.method == 'POST':
-        email_id = request.POST.get('email_id')
-        email = get_object_or_404(Email, id=email_id, user=request.user)
+        return Response({'status': 'success'})
+    
+    @action(detail=True, methods=['post'])
+    def mark_as_important(self, request, pk=None):
+        email = self.get_object()
         email.is_important = True
         email.save()
-        return JsonResponse({'status': 'success'})
-    return JsonResponse({'status': 'error'})
-
-@login_required
-def email_mark_as_not_important(request):
-    if request.method == 'POST':
-        email_id = request.POST.get('email_id')
-        email = get_object_or_404(Email, id=email_id, user=request.user)
+        return Response({'status': 'success'})
+    
+    @action(detail=True, methods=['post'])
+    def mark_as_not_important(self, request, pk=None):
+        email = self.get_object()
         email.is_important = False
         email.save()
-        return JsonResponse({'status': 'success'})
-    return JsonResponse({'status': 'error'})
-
-@login_required
-def email_sent_edit(request, pk):
-    email = get_object_or_404(Email, id=pk, user=request.user)
-    if request.method == 'POST':
-        form = EmailForm(request.POST, instance=email)
-        if form.is_valid():
-            form.save()
-            return redirect('emails:email_sent')
-    else:
-        form = EmailForm(instance=email)
-    context = {'form': form, 'email': email}
-    return render(request, 'emails/email_sent_edit.html', context)
-
-@login_required
-def email_sent_delete(request, pk):
-    email = get_object_or_404(Email, id=pk, user=request.user)
-    email.delete()
-    return redirect('emails:email_sent')
-
-@login_required
-def email_trash_delete(request, pk):
-    email = get_object_or_404(Email, id=pk, user=request.user, is_trash=True)
-    email.delete()
-    return redirect('emails:email_trash')
+        return Response({'status': 'success'})
+    
+    @action(detail=True, methods=['post'])
+    def send_draft(self, request, pk=None):
+        email = self.get_object()
+        if email.is_draft:
+            email_message = EmailMessage(
+                subject=email.subject,
+                body=email.message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[email.to_email]
+            )
+            email_message.send()
+            email.is_draft = False
+            email.is_sent = True
+            email.save()
+            return Response({'status': 'success'})
+        return Response(
+            {'status': 'error', 'message': 'This email is not a draft'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    @action(detail=True, methods=['delete'])
+    def permanent_delete(self, request, pk=None):
+        """Permanently delete an email (from trash)"""
+        email = self.get_object()
+        if email.is_trash:
+            email.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(
+            {'status': 'error', 'message': 'Email must be in trash to delete permanently'},
+            status=status.HTTP_400_BAD_REQUEST
+        )

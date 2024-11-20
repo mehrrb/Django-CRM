@@ -1,6 +1,7 @@
 import arrow
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+from users.models import Users
 
 from common.models import Org, Profile
 from common.base import BaseModel
@@ -10,7 +11,7 @@ from common.base import BaseModel
 class Teams(BaseModel):
     name = models.CharField(max_length=100)
     description = models.TextField()
-    users = models.ManyToManyField(Profile, related_name="user_teams")
+    users = models.ManyToManyField(Users, related_name="user_teams")
     created_on = models.DateTimeField(_("Created on"), auto_now_add=True)
     org = models.ForeignKey(Org, on_delete=models.SET_NULL, null=True, blank=True)
 

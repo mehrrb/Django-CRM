@@ -53,7 +53,7 @@ class Contact(BaseModel):
 
     def __str__(self):
         return self.first_name
-
+    
     @property
     def created_on_arrow(self):
         return arrow.get(self.created_at).humanize()

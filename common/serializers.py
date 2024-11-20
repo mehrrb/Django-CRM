@@ -201,7 +201,7 @@ class ProfileSerializer(serializers.ModelSerializer):
         )
 
 
-class AttachmentsSerializer(serializers.ModelSerializer):
+class AttachmentSerializer(serializers.ModelSerializer):
     file_path = serializers.SerializerMethodField()
 
     def get_file_path(self, obj):

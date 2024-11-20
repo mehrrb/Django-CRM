@@ -1,13 +1,15 @@
 from datetime import datetime
 
 import pytz
-from celery import Celery
+from celery import Celery, shared_task
 from django.conf import settings
 from django.core.mail import EmailMessage
 from django.template import Context, Template
 from django.template.loader import render_to_string
+from emails.models import Email
 
-from accounts.models import Account, AccountEmail, AccountEmailLog
+from users.models import Users
+from accounts.models import Account, AccountEmailLog
 from common.models import Profile
 from common.utils import convert_to_custom_timezone
 
@@ -21,7 +23,7 @@ def send_email(email_obj_id):
         from_email = email_obj.from_email
         contacts = email_obj.recipients.all()
         for contact_obj in contacts:
-            if not EmailLog.objects.filter(
+            if not AccountEmailLog.objects.filter(
                 email=email_obj, contact=contact_obj, is_sent=True
             ).exists():
                 html = email_obj.message_body
@@ -51,7 +53,7 @@ def send_email(email_obj_id):
                     if res:
                         email_obj.rendered_message_body = html_content
                         email_obj.save()
-                        EmailLog.objects.create(
+                        AccountEmailLog.objects.create(
                             email=email_obj, contact=contact_obj, is_sent=True
                         )
                 except Exception as e:
@@ -83,6 +85,42 @@ def send_email_to_assigned_user(recipients, from_email):
             msg.content_subtype = "html"
             msg.send()
 
+@shared_task
+def send_account_assigned_emails(account_id, recipients):
+    """Send email notifications when an account is assigned to users"""
+    
+    if not recipients:
+        return
+        
+    account = Account.objects.filter(id=account_id).first()
+    if not account:
+        return
+        
+    subject = _("Account Assigned: {}").format(account.name)
+    
+    context = {
+        'account_name': account.name,
+        'account_link': settings.DOMAIN_NAME + f'/accounts/{account.id}/view/',
+        'assigned_by': account.created_by.email if account.created_by else '',
+    }
+    
+    html_content = render_to_string('email_templates/account_assigned.html', context)
+    
+    for user_id in recipients:
+        user = Users.objects.filter(id=user_id).first()
+        if not user:
+            continue
+            
+        msg = EmailMessage(
+            subject=subject,
+            body=html_content,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[user.email],
+        )
+        msg.content_subtype = "html"
+        msg.send()
+
+    return True
 
 @app.task
 def send_scheduled_emails():

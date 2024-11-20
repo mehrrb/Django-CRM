@@ -1,17 +1,38 @@
-from django.urls import path
-from rest_framework.routers import SimpleRouter
-from users import views
-
-
-router = SimpleRouter()
-router.register("users_manager",viewset=views.UsersView)
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from . import views
 
 app_name = 'users'
 
+router = DefaultRouter()
+router.register(r'users', views.UserViewSet, basename='user')
+
 urlpatterns = [
-    path('login/', views.LoginView.as_view(),name='login'),
-    path('logout/', views.LogoutView.as_view(),name='logout'),
+    # Default router URLs
+    path('', include(router.urls)),
 
+    # Custom endpoints
+    path(
+        'users/login/',
+        views.UserViewSet.as_view({'post': 'login'}),
+        name='login'
+    ),
+    
+    path(
+        'users/logout/',
+        views.UserViewSet.as_view({'post': 'logout'}),
+        name='logout'
+    ),
+    
+    path(
+        'users/me/',
+        views.UserViewSet.as_view({'get': 'me'}),
+        name='me'
+    ),
+    
+    path(
+        'users/<str:pk>/change-password/',
+        views.UserViewSet.as_view({'post': 'change_password'}),
+        name='change-password'
+    ),
 ]
-
-urlpatterns+=router.urls

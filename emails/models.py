@@ -1,25 +1,38 @@
 from django.db import models
+from django.conf import settings
 from common.base import BaseModel
-
-# Create your models here.
-
+from contacts.models import Contact
 
 class Email(BaseModel):
+    from_account = models.ForeignKey(
+        'accounts.Account',
+        related_name='sent_emails',
+        on_delete=models.SET_NULL,
+        null=True
+    )
+    from_email = models.EmailField(default="noreply@example.com")
+    recipients = models.ManyToManyField(
+        Contact,
+        related_name='received_emails'
+    )
+    message_subject = models.TextField(null=True)
+    message_body = models.TextField(null=True)
 
-    from_email = models.EmailField(max_length=200)
-    to_email = models.EmailField(max_length=200)
-    subject = models.CharField(max_length=200)
-    message = models.CharField(max_length=200)
-    file = models.FileField(null=True, upload_to="files/")
-    # send_time = models.DateTimeField(default=datetime.now)
-    send_time = models.DateTimeField(auto_now_add=True)
-    status = models.CharField(max_length=200, default="sent")
-    important = models.BooleanField(max_length=10, default=False)
+    is_draft = models.BooleanField(default=False)
+    is_sent = models.BooleanField(default=False)
+    is_trash = models.BooleanField(default=False) 
+    is_important = models.BooleanField(default=False)
+    user = models.ForeignKey(
+        'users.Users',
+        on_delete=models.CASCADE,
+        related_name='emails',
+        null=True
+    )
 
     class Meta:
         verbose_name = "Email"
         verbose_name_plural = "Emails"
-        db_table = "email"
+        db_table = "emails"
         ordering = ("-created_at",)
 
     def __str__(self):

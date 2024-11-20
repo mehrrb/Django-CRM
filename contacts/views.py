@@ -1,330 +1,234 @@
-from django.db.models import Q
-from django.shortcuts import get_object_or_404
-from rest_framework import status
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
 from rest_framework.pagination import LimitOffsetPagination
+from django.db.models import Q
+from django.shortcuts import get_object_or_404
 
-from common.models import Attachments, Comment, Profile
-from common.serializer import (
-    AttachmentsSerializer,
-    BillingAddressSerializer,
-    CommentSerializer,
-)
-from common.utils import COUNTRIES
-from contacts.models import Contact
-from contacts.serializer import (
+from .models import Contact
+from .serializers import (
     ContactSerializer,
-    CreateContactSerializer,
+    ContactCreateSerializer,
+    ContactDetailSerializer,
     TaskSerializer
 )
-from contacts.tasks import send_email_to_assigned_user
+from common.models import Comment, Attachments, Profile
+from common.serializers import (
+    CommentSerializer, 
+    AttachmentSerializer,
+    BillingAddressSerializer
+)
+from common.utils import COUNTRIES
 from teams.models import Teams
+from contacts.tasks import send_email_to_assigned_user
 
-
-class ContactsListView(APIView, LimitOffsetPagination):
-    permission_classes = (IsAuthenticated,)
-    model = Contact
-
-    def get_context_data(self, **kwargs):
+class ContactViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    pagination_class = LimitOffsetPagination
+    
+    def get_queryset(self):
         params = self.request.query_params
-        queryset = self.model.objects.filter(org=self.request.profile.org).order_by("-id")
+        queryset = Contact.objects.filter(org=self.request.profile.org).order_by('-id')
         
         # Filter based on user role
         if not self.request.profile.is_admin:
             queryset = queryset.filter(
-                Q(assigned_to__in=[self.request.profile]) |
-                Q(created_by=self.request.profile.user)
+                Q(created_by=self.request.profile) | 
+                Q(assigned_to=self.request.profile)
             ).distinct()
 
         # Apply filters
-        if params:
-            if params.get("name"):
-                queryset = queryset.filter(first_name__icontains=params.get("name"))
-            if params.get("city"):
-                queryset = queryset.filter(address__city__icontains=params.get("city"))
-            if params.get("phone"):
-                queryset = queryset.filter(mobile_number__icontains=params.get("phone"))
-            if params.get("email"):
-                queryset = queryset.filter(primary_email__icontains=params.get("email"))
-            if params.getlist("assigned_to"):
-                queryset = queryset.filter(
-                    assigned_to__id__in=params.get("assigned_to")
-                ).distinct()
-
-        # Pagination
-        results = self.paginate_queryset(queryset.distinct(), self.request, view=self)
-        contacts = ContactSerializer(results, many=True).data
-
-        return {
-            "contacts": contacts,
-            "count": self.count,
-            "next": self.get_next_link(),
-            "previous": self.get_previous_link(),
-            "countries": COUNTRIES,
-            "users": Profile.objects.filter(
-                is_active=True, 
-                org=self.request.profile.org
-            ).values("id", "user__email")
-        }
-
-    def get(self, request, *args, **kwargs):
-        context = self.get_context_data(**kwargs)
-        return Response(context)
-
-    def post(self, request, *args, **kwargs):
-        contact_serializer = CreateContactSerializer(
-            data=request.data, 
-            request_obj=request
-        )
-        address_serializer = BillingAddressSerializer(data=request.data)
-
-        if not all([contact_serializer.is_valid(), address_serializer.is_valid()]):
-            return Response(
-                {
-                    "contact_errors": contact_serializer.errors,
-                    "address_errors": address_serializer.errors
-                },
-                status=status.HTTP_400_BAD_REQUEST
+        if params.get('name'):
+            queryset = queryset.filter(
+                Q(first_name__icontains=params.get('name')) |
+                Q(last_name__icontains=params.get('name'))
             )
+        if params.get('email'):
+            queryset = queryset.filter(primary_email__icontains=params.get('email'))
+        if params.get('phone'):
+            queryset = queryset.filter(mobile_number__icontains=params.get('phone'))
+        if params.get('city'):
+            queryset = queryset.filter(address__city__icontains=params.get('city'))
+        if params.getlist('assigned_to'):
+            queryset = queryset.filter(
+                assigned_to__id__in=params.getlist('assigned_to')
+            ).distinct()
+            
+        return queryset
 
-        # Save information
-        address = address_serializer.save()
-        contact = contact_serializer.save(
-            date_of_birth=request.data.get("date_of_birth"),
-            address=address,
-            org=request.profile.org
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return ContactCreateSerializer
+        elif self.action == 'retrieve':
+            return ContactDetailSerializer
+        return ContactSerializer
+
+    def perform_create(self, serializer):
+        # Create address first
+        address_serializer = BillingAddressSerializer(data=self.request.data)
+        if address_serializer.is_valid():
+            address = address_serializer.save()
+        else:
+            raise serializers.ValidationError(address_serializer.errors)
+
+        contact = serializer.save(
+            org=self.request.profile.org,
+            created_by=self.request.profile,
+            address=address
         )
-
+        
         # Add teams
-        if request.data.get("teams"):
+        if self.request.data.get('teams'):
             teams = Teams.objects.filter(
-                id__in=request.data.get("teams"),
-                org=request.profile.org
+                id__in=self.request.data.get('teams'),
+                org=self.request.profile.org
             )
             contact.teams.add(*teams)
 
-        # Add users
-        if request.data.get("assigned_to"):
+        # Add assigned users and send emails
+        if self.request.data.get('assigned_to'):
             profiles = Profile.objects.filter(
-                id__in=request.data.get("assigned_to"),
-                org=request.profile.org
+                id__in=self.request.data.get('assigned_to'),
+                org=self.request.profile.org
             )
             contact.assigned_to.add(*profiles)
             
-            # Send email
-            recipients = list(profiles.values_list("id", flat=True))
+            recipients = list(profiles.values_list('id', flat=True))
             send_email_to_assigned_user.delay(recipients, contact.id)
 
-        # Upload file
-        if request.FILES.get("contact_attachment"):
-            attachment = Attachments.objects.create(
-                created_by=request.profile.user,
-                file_name=request.FILES.get("contact_attachment").name,
+        # Handle attachments
+        if self.request.FILES.get('contact_attachment'):
+            Attachments.objects.create(
+                created_by=self.request.profile.user,
+                file_name=self.request.FILES.get('contact_attachment').name,
                 contact=contact,
-                attachment=request.FILES.get("contact_attachment")
+                attachment=self.request.FILES.get('contact_attachment'),
+                org=self.request.profile.org
             )
 
-        return Response(
-            {"message": "Contact created successfully"},
-            status=status.HTTP_201_CREATED
-        )
-
-
-class ContactDetailView(APIView):
-    permission_classes = (IsAuthenticated,)
-
-    def get_object(self, pk):
-        return get_object_or_404(Contact, pk=pk)
-
-    def get(self, request, pk):
-        contact = self.get_object(pk)
+    def perform_update(self, serializer):
+        contact = self.get_object()
         
-        # Check access
-        if contact.org != request.profile.org:
-            return Response(
-                {"error": "Organization mismatch"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        if not request.profile.is_admin:
-            if not (
-                request.profile == contact.created_by or
-                request.profile in contact.assigned_to.all()
-            ):
-                return Response(
-                    {"error": "Permission denied"},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-
-        return Response({
-            "contact": ContactSerializer(contact).data,
-            "address": BillingAddressSerializer(contact.address).data,
-            "attachments": AttachmentsSerializer(
-                contact.contact_attachment.all(), 
-                many=True
-            ).data,
-            "comments": CommentSerializer(
-                contact.contact_comments.all(),
-                many=True
-            ).data,
-            "tasks": TaskSerializer(
-                contact.contacts_tasks.all(),
-                many=True
-            ).data,
-            "countries": COUNTRIES
-        })
-
-    def put(self, request, pk):
-        contact = self.get_object(pk)
-        
-        # Check access
-        if contact.org != request.profile.org:
-            return Response(
-                {"error": "Organization mismatch"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        if not request.profile.is_admin:
-            if not (
-                request.profile == contact.created_by or
-                request.profile in contact.assigned_to.all()
-            ):
-                return Response(
-                    {"error": "Permission denied"},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-
-        contact_serializer = CreateContactSerializer(
-            instance=contact,
-            data=request.data,
-            request_obj=request
-        )
+        # Update address
         address_serializer = BillingAddressSerializer(
             instance=contact.address,
-            data=request.data
+            data=self.request.data
         )
+        if address_serializer.is_valid():
+            address = address_serializer.save()
+        else:
+            raise serializers.ValidationError(address_serializer.errors)
 
-        if not all([contact_serializer.is_valid(), address_serializer.is_valid()]):
-            return Response(
-                {
-                    "contact_errors": contact_serializer.errors,
-                    "address_errors": address_serializer.errors
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Update information
-        address = address_serializer.save()
-        contact = contact_serializer.save(
-            date_of_birth=request.data.get("date_of_birth"),
-            address=address
-        )
-
+        contact = serializer.save(address=address)
+        
         # Update teams
-        if request.data.get("teams"):
+        if self.request.data.get('teams'):
             contact.teams.clear()
             teams = Teams.objects.filter(
-                id__in=request.data.get("teams"),
-                org=request.profile.org
+                id__in=self.request.data.get('teams'),
+                org=self.request.profile.org
             )
             contact.teams.add(*teams)
 
-        # Update users
-        if request.data.get("assigned_to"):
-            old_assigned = set(contact.assigned_to.values_list("id", flat=True))
+        # Update assigned users
+        if self.request.data.get('assigned_to'):
+            old_assigned = set(contact.assigned_to.values_list('id', flat=True))
             contact.assigned_to.clear()
             
             profiles = Profile.objects.filter(
-                id__in=request.data.get("assigned_to"),
-                org=request.profile.org
+                id__in=self.request.data.get('assigned_to'),
+                org=self.request.profile.org
             )
             contact.assigned_to.add(*profiles)
             
             # Send email to new users
-            new_assigned = set(profiles.values_list("id", flat=True))
+            new_assigned = set(profiles.values_list('id', flat=True))
             recipients = list(new_assigned - old_assigned)
             if recipients:
                 send_email_to_assigned_user.delay(recipients, contact.id)
 
-        return Response(
-            {"message": "Contact updated successfully"},
-            status=status.HTTP_200_OK
-        )
-
-    def delete(self, request, pk):
-        contact = self.get_object(pk)
+    def destroy(self, request, *args, **kwargs):
+        contact = self.get_object()
         
-        # Check access
-        if contact.org != request.profile.org:
-            return Response(
-                {"error": "Organization mismatch"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         if not request.profile.is_admin and request.profile != contact.created_by:
             return Response(
-                {"error": "Permission denied"},
+                {'error': 'Permission denied'},
                 status=status.HTTP_403_FORBIDDEN
             )
-
+            
         if contact.address:
             contact.address.delete()
         contact.delete()
-
-        return Response(
-            {"message": "Contact deleted successfully"},
-            status=status.HTTP_200_OK
-        )
-
-
-class ContactCommentView(APIView):
-    permission_classes = (IsAuthenticated,)
-
-    def post(self, request, pk):
-        contact = get_object_or_404(Contact, pk=pk)
         
-        # Check access
-        if contact.org != request.profile.org:
-            return Response(
-                {"error": "Organization mismatch"},
-                status=status.HTTP_403_FORBIDDEN
-            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @action(detail=True, methods=['post'])
+    def add_comment(self, request, pk=None):
+        contact = self.get_object()
         serializer = CommentSerializer(data=request.data)
         if serializer.is_valid():
             comment = serializer.save(
-                contact=contact,
                 commented_by=request.profile,
+                contact=contact,
                 org=request.profile.org
             )
             return Response(
-                {"message": "Comment added successfully"},
+                CommentSerializer(comment).data,
                 status=status.HTTP_201_CREATED
             )
-
         return Response(
-            {"errors": serializer.errors},
+            serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
         )
 
+    @action(detail=True, methods=['get'])
+    def tasks(self, request, pk=None):
+        contact = self.get_object()
+        tasks = contact.contacts_tasks.all()
+        serializer = TaskSerializer(tasks, many=True)
+        return Response(serializer.data)
 
-class ContactAttachmentView(APIView):
-    permission_classes = (IsAuthenticated,)
+    @action(detail=True, methods=['post'])
+    def add_attachment(self, request, pk=None):
+        contact = self.get_object()
+        serializer = AttachmentSerializer(data=request.data)
+        if serializer.is_valid():
+            attachment = serializer.save(
+                created_by=request.profile,
+                contact=contact,
+                org=request.profile.org
+            )
+            return Response(
+                AttachmentSerializer(attachment).data,
+                status=status.HTTP_201_CREATED
+            )
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-    def delete(self, request, pk):
-        attachment = get_object_or_404(Attachments, pk=pk)
+    @action(detail=True, methods=['delete'])
+    def remove_attachment(self, request, pk=None):
+        attachment_id = request.query_params.get('attachment_id')
+        if not attachment_id:
+            return Response(
+                {'error': 'attachment_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        attachment = get_object_or_404(
+            Attachments,
+            id=attachment_id,
+            contact=self.get_object(),
+            org=request.profile.org
+        )
         
-        # Check access
         if not request.profile.is_admin and request.profile != attachment.created_by:
             return Response(
-                {"error": "Permission denied"},
+                {'error': 'Permission denied'},
                 status=status.HTTP_403_FORBIDDEN
             )
-
+            
         attachment.delete()
-        return Response(
-            {"message": "Attachment deleted successfully"},
-            status=status.HTTP_200_OK
-        )
+        return Response(status=status.HTTP_204_NO_CONTENT)

@@ -1,534 +1,224 @@
-from datetime import datetime, timedelta
-
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from rest_framework.test import APITestCase
+from rest_framework import status
 from django.urls import reverse
-
-from accounts.models import Account
-from common.models import Address, Attachments, Comment, Company, User
-from invoices.models import Invoice, InvoiceHistory
+from datetime import datetime, timedelta
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test.utils import override_settings
+from users.models import Users
 from teams.models import Teams
+from accounts.models import Account
+from common.models import Comment, Attachments
+from .models import Invoice, InvoiceHistory
+from .tasks import send_email, send_invoice_email, send_invoice_email_cancel
 
-
-class InvoiceCreateTest(object):
+class InvoiceBaseTest(APITestCase):
     def setUp(self):
-        self.company, _ = Company.objects.get_or_create(
-            name="test company",
-            address="IN",
-            sub_domain="test",
-            country="IN",
+        # Create users
+        self.user = Users.objects.create_user(
+            email="johnDoeInvoice@example.com", 
+            password="password"
         )
-        self.user = User.objects.create(
-            first_name="johnInvoice",
-            username="johnDoeInvoice",
-            email="johnDoeInvoice@example.com",
-            role="ADMIN",
-            company=self.company,
+        self.user1 = Users.objects.create_user(
+            email="janeDoeInvoice@example.com", 
+            password="password"
         )
-        self.user.set_password("password")
-        self.user.save()
-
-        self.user1 = User.objects.create(
-            first_name="janeInvoice",
-            username="janeDoeInvoice",
-            email="janeDoeInvoice@example.com",
-            role="USER",
-            has_sales_access=True,
-            company=self.company,
+        self.user2 = Users.objects.create_user(
+            email="joeInvoice@example.com", 
+            password="password"
         )
-        self.user1.set_password("password")
-        self.user1.save()
 
-        self.user2 = User.objects.create(
-            first_name="joeInvoice",
-            username="joeInvoice",
-            email="joeInvoice@example.com",
-            role="USER",
-            has_sales_access=True,
-            company=self.company,
-        )
-        self.user2.set_password("password")
-        self.user2.save()
+        # Create team
+        self.team_dev = Teams.objects.create(name="Dev Team")
+        self.team_dev.users.add(self.user, self.user1)
 
-        self.team_dev = Teams.objects.create(name="invoices teams")
-        self.team_dev.users.add(self.user2.id)
-
+        # Create account
         self.account = Account.objects.create(
-            name="john invoice",
-            email="johnDoeInvoice@example.com",
-            phone="123456789",
-            billing_address_line="",
-            billing_street="street name",
-            billing_city="city name",
-            billing_state="state",
-            billing_postcode="1234",
-            billing_country="US",
-            website="www.example.como",
-            created_by=self.user,
-            status="open",
-            industry="SOFTWARE",
-            description="Testing",
-        )
-        self.account.assigned_to.add(self.user1.id)
-
-        self.from_address = Address.objects.create(
-            street="from street number",
-            city="from city",
-            state="from state",
-            postcode=12346,
-            country="IN",
+            name="Test Account",
+            email="account@example.com",
+            created_by=self.user
         )
 
-        self.to_address = Address.objects.create(
-            street="to street number",
-            city="to city",
-            state="to state",
-            postcode=12346,
-            country="IN",
-        )
-
+        # Create invoice
         self.invoice = Invoice.objects.create(
-            invoice_title="invoice title",
+            invoice_title="Test Invoice",
             invoice_number="invoice number",
             currency="USD",
             email="invoiceTitle@email.com",
-            due_date=(datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d"),
-            total_amount="1000",
-            created_by=self.user,
-            from_address=self.from_address,
-            to_address=self.to_address,
+            due_date="2024-11-22",
+            amount=1000.00,
+            total_amount=1000.00,
+            status="draft",
+            user=self.user
         )
-        self.invoice.assigned_to.add(self.user1.id)
-        self.invoice.accounts.add(self.account.id)
 
+        # Create invoice history
         self.invoice_history = InvoiceHistory.objects.create(
-            invoice_title="invoice title",
-            invoice_number="invoice number",
-            currency="USD",
-            email="invoiceTitle@email.com",
-            due_date=(datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d"),
-            total_amount="1000",
-            from_address=self.from_address,
-            to_address=self.to_address,
             invoice=self.invoice,
+            status="draft",
+            user=self.user
         )
 
-        self.invoice_1 = Invoice.objects.create(
-            invoice_title="invoice title",
-            invoice_number="invoice_1 number",
-            currency="USD",
-            email="invoiceTitle@email.com",
-            due_date=(datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d"),
-            total_amount="1000",
-            created_by=self.user1,
-        )
-        self.invoice_1.assigned_to.add(self.user2.id)
-        self.invoice_1.assigned_to.add(self.user1.id)
-        self.invoice_1.accounts.add(self.account.id)
-
+        # Create comment
         self.comment = Comment.objects.create(
-            comment="test comment", invoice=self.invoice, commented_by=self.user
+            comment="Test Comment",
+            user=self.user,
+            invoice=self.invoice
         )
+
+        # Create attachment
         self.attachment = Attachments.objects.create(
-            attachment="image.png", invoice=self.invoice, created_by=self.user
+            attachment=SimpleUploadedFile("test.txt", b"test content"),
+            created_by=self.user,
+            invoice=self.invoice
         )
 
+        # URLs
+        self.list_url = reverse('api_invoices:invoice-list')
+        self.detail_url = reverse('api_invoices:invoice-detail', args=[self.invoice.id])
+        self.email_url = reverse('api_invoices:invoice-send-email', args=[self.invoice.id])
+        self.cancel_url = reverse('api_invoices:invoice-cancel', args=[self.invoice.id])
+        self.status_url = reverse('api_invoices:invoice-change-status', args=[self.invoice.id])
+        self.comment_url = reverse('api_invoices:invoice-add-comment')
+        self.attachment_url = reverse('api_invoices:invoice-add-attachment')
 
-class InvoiceListTestCase(InvoiceCreateTest, TestCase):
-    def test_invoices_list(self):
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.get(reverse("invoices:invoices_list"))
-        self.assertEqual(response.status_code, 200)
+class InvoiceListTest(InvoiceBaseTest):
+    def test_get_invoice_list(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(self.list_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.get(reverse("invoices:invoices_list"))
-        self.assertEqual(response.status_code, 200)
-
+    def test_create_invoice(self):
+        self.client.force_authenticate(user=self.user)
         data = {
-            "invoice_title_number": "title",
-            "created_by": self.user.id,
-            "assigned_to": self.user1.id,
-            "status": "Draft",
-            "total_amount": "1000",
+            'invoice_title': "invoice title",
+            'status': "Draft",
+            'invoice_number': "INV123",
+            'currency': "INR",
+            'email': "invoice@example.com",
+            'due_date': (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d"),
+            'total_amount': "1234",
+            'teams': [self.team_dev.id],
+            'accounts': [self.account.id],
+            'assigned_to': [self.user1.id],
+            'quantity': 0
         }
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:invoices_list"), data)
-        self.assertEqual(response.status_code, 200)
+        response = self.client.post(self.list_url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:invoices_list"), data)
-        self.assertEqual(response.status_code, 200)
+    def test_invoice_filter(self):
+        self.client.force_authenticate(user=self.user)
+        # Test invoice number filter
+        response = self.client.get(f"{self.list_url}?invoice_number=invoice number")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
 
-        self.assertEqual(str(self.invoice), "invoice number")
-        self.assertEqual(str(self.invoice.formatted_rate()), "0 USD")
-        self.assertEqual(str(self.invoice.formatted_total_quantity()), "0 Hours")
+        # Test status filter
+        response = self.client.get(f"{self.list_url}?status=draft")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
 
-        self.assertEqual(str(self.invoice_history), "invoice number")
-        self.assertEqual(str(self.invoice_history.formatted_rate()), "0 USD")
-        self.assertEqual(
-            str(self.invoice_history.formatted_total_quantity()), "0 Hours"
-        )
-        self.assertEqual(str(self.invoice_history.formatted_total_amount()), "USD 1000")
+class InvoiceDetailTest(InvoiceBaseTest):
+    def test_get_invoice_detail(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(self.detail_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        # self.assertTrue(
-        #     self.invoice_history.created_on_arrow in ["just now" or "seconds ago"]
-        # )
-
-
-class InvoiceAddTestCase(InvoiceCreateTest, TestCase):
-    def test_invoices_create(self):
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.get(reverse("invoices:invoices_create"))
-        self.assertEqual(response.status_code, 200)
-
+    def test_update_invoice(self):
+        self.client.force_authenticate(user=self.user)
         data = {
-            "invoice_title": "invoice title create",
-            "status": "Draft",
-            "invoice_number": "invoice number",
-            "currency": "INR",
-            "email": "invoice@example.com",
-            "due_data": (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d"),
-            "total_amount": "1234",
-            "teams": self.team_dev.id,
-            "accounts": self.account.id,
-            "assigned_to": self.user1.id,
+            "invoice_title": "Updated Invoice",
+            "amount": 1500.00
         }
+        response = self.client.patch(self.detail_url, data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['invoice_title'], "Updated Invoice")
 
-        response = self.client.post(reverse("invoices:invoices_create"), data)
-        self.assertEqual(response.status_code, 200)
+    def test_delete_invoice(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.delete(self.detail_url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
+    def test_unauthorized_access(self):
+        self.client.force_authenticate(user=self.user2)
+        response = self.client.get(self.detail_url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+class InvoiceActionTest(InvoiceBaseTest):
+    def test_send_email(self):
+        self.client.force_authenticate(user=self.user)
         data = {
-            "invoice_title": "invoice title",
-            "status": "Draft",
-            "invoice_number": "INV123",
-            "currency": "INR",
-            "email": "invoice@example.com",
-            "due_date": (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d"),
-            "total_amount": "1234",
-            "teams": self.team_dev.id,
-            "accounts": self.account.id,
-            "assigned_to": self.user1.id,
-            "quantity": 0,
+            "recipient_emails": ["client@test.com"],
+            "subject": "Test Invoice Email",
+            "message": "Please find attached invoice"
         }
-        response = self.client.post(reverse("invoices:invoices_create"), data)
-        self.assertEqual(response.status_code, 200)
+        response = self.client.post(self.email_url, data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
+    def test_cancel_invoice(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(self.cancel_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "cancelled")
+
+    def test_change_status(self):
+        self.client.force_authenticate(user=self.user)
+        data = {"status": "paid"}
+        response = self.client.post(self.status_url, data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, "paid")
+
+class InvoiceCommentTest(InvoiceBaseTest):
+    def test_add_comment(self):
+        self.client.force_authenticate(user=self.user)
         data = {
-            "invoice_title": "invoice title",
-            "status": "Draft",
-            "invoice_number": "INV1234",
-            "currency": "INR",
-            "email": "invoice@example.com",
-            "due_date": (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d"),
-            "total_amount": "1234",
-            "teams": self.team_dev.id,
-            "accounts": self.account.id,
-            "assigned_to": self.user1.id,
-            "quantity": 0,
-            "from_account": self.account.id,
+            'comment': 'test comment invoice',
+            'invoice_id': self.invoice.id
         }
-        response = self.client.post(reverse("invoices:invoices_create"), data)
-        self.assertEqual(response.status_code, 200)
+        response = self.client.post(self.comment_url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.get(reverse("invoices:invoices_list"))
-        self.assertEqual(response.status_code, 200)
-
-
-class InvoiceDetailTestCase(InvoiceCreateTest, TestCase):
-    def test_invoices_detail(self):
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_details", args=(self.invoice.id,))
-        )
-        self.assertEqual(response.status_code, 200)
-
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_details", args=(self.invoice.id,))
-        )
-        self.assertEqual(response.status_code, 200)
-        response = self.client.get(
-            reverse("invoices:invoice_details", args=(self.invoice_1.id,))
-        )
-        self.assertEqual(response.status_code, 200)
-
-        self.client.login(email="joeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_details", args=(self.invoice.id,))
-        )
-        self.assertEqual(response.status_code, 403)
-
-
-class InvoiceEditTestCase(InvoiceCreateTest, TestCase):
-    def test_invoices_edit(self):
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_edit", args=(self.invoice.id,))
-        )
-        self.assertEqual(response.status_code, 200)
-
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_edit", args=(self.invoice_1.id,))
-        )
-        self.assertEqual(response.status_code, 200)
-
-        self.client.login(email="joeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_edit", args=(self.invoice.id,))
-        )
-        self.assertEqual(response.status_code, 403)
-
+    def test_update_comment(self):
+        self.client.force_authenticate(user=self.user)
         data = {
-            "invoice_title": "invoice title",
-            "status": "Draft",
-            "invoice_number": "INV1234",
-            "currency": "INR",
-            "email": "invoice@example.com",
-            "due_date": (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d"),
-            "total_amount": "1234",
-            "teams": self.team_dev.id,
-            "accounts": self.account.id,
-            "assigned_to": self.user1.id,
-            "quantity": 0,
-            "from_account": self.account.id,
-            "from-address_line": "",
-            "from-street": "",
-            "from-city": "",
-            "from-state": "",
-            "from-postcode": "",
-            "from-country": "",
-            "to-address_line": "",
-            "to-street": "",
-            "to-city": "",
-            "to-state": "",
-            "to-postcode": "",
-            "to-country": "",
+            'comment': 'updated comment'
         }
+        url = reverse('api_invoices:invoice-update-comment', args=[self.comment.id])
+        response = self.client.put(url, data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.post(
-            reverse("invoices:invoice_edit", args=(self.invoice.id,)), data
-        )
-        self.assertEqual(response.status_code, 200)
-
-        data.pop("from_account")
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.post(
-            reverse("invoices:invoice_edit", args=(self.invoice.id,)), data
-        )
-        self.assertEqual(response.status_code, 200)
-
-        data.pop("invoice_number")
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.post(
-            reverse("invoices:invoice_edit", args=(self.invoice.id,)), data
-        )
-        self.assertEqual(response.status_code, 200)
-
-
-class InvoiceSendMailTestCase(InvoiceCreateTest, TestCase):
-    def test_invoices_send_mail(self):
-
-        self.client.login(email="joeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_send_mail", args=(self.invoice_1.id,))
-        )
-        self.assertEqual(response.status_code, 403)
-
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_send_mail", args=(self.invoice_1.id,))
-        )
-        self.assertEqual(response.status_code, 302)
-
-
-class InvoiceChangeStatusPaidTestCase(InvoiceCreateTest, TestCase):
-    def test_invoices_change_status_to_paid(self):
-
-        self.client.login(email="joeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_change_status_paid", args=(self.invoice_1.id,))
-        )
-        self.assertEqual(response.status_code, 403)
-
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_change_status_paid", args=(self.invoice_1.id,))
-        )
-        self.assertEqual(response.status_code, 302)
-
-
-class InvoiceChangeStatusCancelledTestCase(InvoiceCreateTest, TestCase):
-    def test_invoices_change_status_to_cancelled(self):
-
-        self.client.login(email="joeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse(
-                "invoices:invoice_change_status_cancelled", args=(self.invoice_1.id,)
-            )
-        )
-        self.assertEqual(response.status_code, 403)
-
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse(
-                "invoices:invoice_change_status_cancelled", args=(self.invoice_1.id,)
-            )
-        )
-        self.assertEqual(response.status_code, 302)
-
-
-class InvoiceDownloadTestCase(InvoiceCreateTest, TestCase):
-    def test_invoices_download(self):
-
-        self.client.login(email="joeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_download", args=(self.invoice.id,))
-        )
-        self.assertEqual(response.status_code, 403)
-
-        # self.client.login(email='johnDoeInvoice@example.com',
-        #                   password='password')
-        # response = self.client.get(
-        #     reverse('invoices:invoice_download', args=(self.invoice_1.id,)))
-        # self.assertEqual(response.status_code, 200)
-
-
-class AddCommentTestCase(InvoiceCreateTest, TestCase):
-    def test_invoice_add_comment(self):
-
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
+class InvoiceAttachmentTest(InvoiceBaseTest):
+    def test_add_attachment(self):
+        self.client.force_authenticate(user=self.user)
         data = {
-            "comment": "",
-            "invoice_id": self.invoice.id,
+            'attachment': SimpleUploadedFile("file.txt", b"file content"),
+            'invoice_id': self.invoice.id
         }
-        response = self.client.post(reverse("invoices:add_comment"), data)
-        self.assertEqual(response.status_code, 200)
+        response = self.client.post(self.attachment_url, data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-        data = {
-            "comment": "test comment invoice",
-            "invoice_id": self.invoice.id,
-        }
-        response = self.client.post(reverse("invoices:add_comment"), data)
-        self.assertEqual(response.status_code, 200)
+    def test_delete_attachment(self):
+        self.client.force_authenticate(user=self.user)
+        url = reverse('api_invoices:invoice-remove-attachment', args=[self.attachment.id])
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:add_comment"), data)
-        self.assertEqual(response.status_code, 200)
+class InvoiceCeleryTest(InvoiceBaseTest):
+    @override_settings(
+        CELERY_EAGER_PROPAGATES_EXCEPTIONS=True,
+        CELERY_ALWAYS_EAGER=True,
+        BROKER_BACKEND="memory"
+    )
+    def test_invoice_email_tasks(self):
+        # Test send email task
+        task = send_email.apply((self.invoice.id, [self.user.id]))
+        self.assertEqual("SUCCESS", task.state)
 
+        # Test send invoice email task
+        task = send_invoice_email.apply((self.invoice.id,))
+        self.assertEqual("SUCCESS", task.state)
 
-class UpdateCommentTestCase(InvoiceCreateTest, TestCase):
-    def test_invoice_update_comment(self):
-
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        data = {
-            "commentid": self.comment.id,
-            "invoice_id": self.invoice.id,
-            "comment": "",
-        }
-        response = self.client.post(reverse("invoices:edit_comment"), data)
-        self.assertEqual(response.status_code, 200)
-
-        data = {
-            "comment": "test comment",
-            "commentid": self.comment.id,
-            "invoice_id": self.invoice.id,
-        }
-        response = self.client.post(reverse("invoices:edit_comment"), data)
-        self.assertEqual(response.status_code, 200)
-
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:edit_comment"), data)
-        self.assertEqual(response.status_code, 200)
-
-
-class DeleteCommentTestCase(InvoiceCreateTest, TestCase):
-    def test_invoice_delete_comment(self):
-
-        data = {
-            "comment_id": self.comment.id,
-        }
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:remove_comment"), data)
-        self.assertEqual(response.status_code, 200)
-
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:remove_comment"), data)
-        self.assertEqual(response.status_code, 200)
-
-
-class AddAttachmentTestCase(InvoiceCreateTest, TestCase):
-    def test_invoice_add_attachment(self):
-
-        data = {
-            "attachment": SimpleUploadedFile(
-                "file_name.txt", bytes("file contents.", "utf-8")
-            ),
-            "invoice_id": self.invoice.id,
-        }
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:add_attachment"), data)
-        self.assertEqual(response.status_code, 200)
-
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:add_attachment"), data)
-        self.assertEqual(response.status_code, 200)
-
-        data = {"attachment": "", "invoice_id": self.invoice.id}
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:add_attachment"), data)
-        self.assertEqual(response.status_code, 200)
-
-
-class DeleteAttachmentTestCase(InvoiceCreateTest, TestCase):
-    def test_invoice_delete_attachment(self):
-
-        data = {
-            "attachment_id": self.attachment.id,
-        }
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:remove_attachment"), data)
-        self.assertEqual(response.status_code, 200)
-
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        response = self.client.post(reverse("invoices:remove_attachment"), data)
-        self.assertEqual(response.status_code, 200)
-
-
-class InvoiceDeleteTestCase(InvoiceCreateTest, TestCase):
-    def test_invoices_delete(self):
-
-        self.client.login(email="joeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_delete", args=(self.invoice_1.id,))
-        )
-        self.assertEqual(response.status_code, 403)
-
-        self.client.login(email="janeDoeInvoice@example.com", password="password")
-        response = self.client.get(
-            reverse("invoices:invoice_delete", args=(self.invoice_1.id,))
-        )
-        self.assertEqual(response.status_code, 302)
-
-        self.client.login(email="johnDoeInvoice@example.com", password="password")
-        self.invoice.status = "Sent"
-        self.invoice.is_email_sent = False
-        self.invoice.save()
-        self.assertEqual(self.invoice.is_sent(), True)
-        self.invoice.status = "Sent"
-        self.invoice.is_email_sent = True
-        self.invoice.save()
-        self.assertEqual(self.invoice.is_resent(), True)
-        self.assertEqual(self.invoice.is_draft(), False)
-        self.invoice.status = "Paid"
-        self.invoice.save()
-        self.assertEqual(self.invoice.is_paid_or_cancelled(), True)
-        response = self.client.get(
-            reverse("invoices:invoice_delete", args=(self.invoice.id,))
-            + "?view_account={}".format(
-                self.account.id,
-            )
-        )
-        self.assertEqual(response.status_code, 302)
+        # Test send invoice cancel email task
+        task = send_invoice_email_cancel.apply((self.invoice.id,))
+        self.assertEqual("SUCCESS", task.state)

@@ -4,7 +4,8 @@ from django.core.mail import EmailMessage
 from django.shortcuts import reverse
 from django.template.loader import render_to_string
 
-from accounts.models import Account, Email
+from accounts.models import Account
+from emails.models import Email
 from common.models import User
 from contacts.models import Contact
 from tasks.models import Task

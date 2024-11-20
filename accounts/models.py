@@ -134,33 +134,14 @@ class Account(BaseModel):
         return Profile.objects.filter(id__in=list(user_ids))
 
 
-class AccountEmail(BaseModel):
-    from_account = models.ForeignKey(
-        Account, related_name="sent_email", on_delete=models.SET_NULL, null=True
-    )
-    recipients = models.ManyToManyField(Contact, related_name="recieved_email")
-    message_subject = models.TextField(null=True)
-    message_body = models.TextField(null=True)
-    timezone = models.CharField(max_length=100, default="UTC")
-    scheduled_date_time = models.DateTimeField(null=True)
-    scheduled_later = models.BooleanField(default=False)
-    from_email = models.EmailField()
-    rendered_message_body = models.TextField(null=True)
-
-    class Meta:
-        verbose_name = "Account Email"
-        verbose_name_plural = "Account Emails"
-        db_table = "account_email"
-        ordering = ("-created_at",)
-
-    def __str__(self):
-        return f"{self.message_subject}"
-
 class AccountEmailLog(BaseModel):
     """this model is used to track if the email is sent or not"""
 
     email = models.ForeignKey(
-        AccountEmail, related_name="email_log", on_delete=models.SET_NULL, null=True
+        'emails.Email',
+        related_name="email_log",
+        on_delete=models.SET_NULL,
+        null=True
     )
     contact = models.ForeignKey(
         Contact, related_name="contact_email_log", on_delete=models.SET_NULL, null=True

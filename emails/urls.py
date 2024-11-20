@@ -6,7 +6,6 @@ from . import views
 
 app_name = "emails"
 
-
 urlpatterns = [
     path('', views.emails_list, name='list'),
     path('compose/', views.email_compose, name='compose'),
@@ -23,4 +22,8 @@ urlpatterns = [
     path('email_sent_edit/<int:pk>/', views.email_sent_edit, name='email_sent_edit'),
     path('email_sent_delete/<int:pk>/', views.email_sent_delete, name='email_sent_delete'),
     path('email_trash_delete/<int:pk>/', views.email_trash_delete, name='email_trash_delete'),
+    path('list/', views.emails_list, name='email_list'),
+    path('email_view/<int:pk>/', views.email_sent_edit, name='email_view'),
+    path('email_delete/<int:pk>/', views.email_sent_delete, name='email_delete'),
+    path('email_draft_delete/<int:pk>/', views.email_draft_delete, name='email_draft_delete'),
 ]
