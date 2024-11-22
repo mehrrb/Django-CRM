@@ -2,18 +2,19 @@ from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
+from users.factories import UserFactory
 from django.test import override_settings
-from django.contrib.auth.models import Group
-from django.conf import settings
-import jwt
 import logging
+from rest_framework_simplejwt.tokens import RefreshToken
+import tempfile
+from django.core.files.uploadedfile import SimpleUploadedFile
 
-from common.models import (
-    Profile,
-    Org,
-    Document,
-    Comment,
-    APISettings
+from common.models import Profile, Org, Document, APISettings
+from common.factories import (
+    OrgFactory, 
+    ProfileFactory, 
+    DocumentFactory,
+    APISettingsFactory
 )
 
 logger = logging.getLogger(__name__)
@@ -26,95 +27,91 @@ TEST_MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'common.middleware.get_company.GetProfileAndOrg',
+    'common.middleware.OrgMiddleware',
 ]
 
 @override_settings(MIDDLEWARE=TEST_MIDDLEWARE)
 class BaseTest(APITestCase):
     def setUp(self):
-        # Create user
-        self.user = User.objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="testpass123",
-            is_active=True
-        )
-        
-        # Create organization
-        self.org = Org.objects.create(
-            name="Test Organization",
-            address="Test Address",
+        self.user = UserFactory()
+        self.org = OrgFactory()
+        self.profile = ProfileFactory(
             user=self.user,
-            country="US"
-        )
-        
-        # Create profile
-        self.profile = Profile.objects.create(
-            user=self.user,
-            role="ADMIN",
             org=self.org,
-            is_active=True,
-            has_sales_access=True,
-            has_marketing_access=True,
-            is_organization_admin=True
+            role='ADMIN'
         )
-
-        # Create JWT token
-        payload = {
-            'user_id': str(self.user.id),
-            'exp': 1732187943,
-            'iat': 1732101543,
-            'jti': 'test-jwt-id',
-            'token_type': 'access'
-        }
         
-        # Get JWT settings from Django settings
-        jwt_algo = getattr(settings, 'JWT_ALGO', 'HS256')
+        # Get JWT token
+        refresh = RefreshToken.for_user(self.user)
+        self.access_token = str(refresh.access_token)
         
-        self.token = jwt.encode(
-            payload,
-            settings.SECRET_KEY,
-            algorithm=jwt_algo
-        )
-
-        # Login the user
-        self.client.login(username="testuser", password="testpass123")
-        
-        # Set up client credentials
+        # Setup client with auth headers
         self.client.credentials(
-            HTTP_AUTHORIZATION=f'Bearer {self.token}',
-            HTTP_ORG=str(self.org.id)
+            HTTP_AUTHORIZATION=f'Bearer {self.access_token}',
+            HTTP_X_ORG=str(self.org.id)
         )
 
-        logger.info(f"Test Setup Complete:")
-        logger.info(f"User ID: {self.user.id}")
-        logger.info(f"Org ID: {self.org.id}")
-        logger.info(f"Profile ID: {self.profile.id}")
-        logger.info(f"Token: {self.token}")
+class APISettingsTests(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self.api_settings = APISettingsFactory(
+            org=self.org,
+            created_by=self.profile
+        )
+        
+    def test_api_settings_crud_operations(self):
+        """Test API Settings CRUD operations"""
+        url = reverse('common:api-settings-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        data = {
+            "title": "Test API Settings",
+            "website": "https://api.test.com"
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-class CommonViewSetTests(BaseTest):
-    def test_org_get(self):
-        url = reverse('api_common:common-org')
+class DocumentTests(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self.document = DocumentFactory(
+            org=self.org,
+            created_by=self.profile
+        )
+        
+    def test_document_crud_operations(self):
+        """Test document CRUD operations"""
+        url = reverse('common:document-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_org_create(self):
-        url = reverse('api_common:common-org')
+class OrgTests(BaseTest):
+    def test_org_crud_operations(self):
+        """Test organization CRUD operations"""
+        url = reverse('common:org-list')
         data = {
-            "name": "NewOrganization"  # No special characters, just name field
+            'name': 'Test Org',
+            'address': 'Test Address',
+            'country': 'US'
         }
-        
-        logger.info(f"POST Request:")
-        logger.info(f"URL: {url}")
-        logger.info(f"Data: {data}")
-        
-        response = self.client.post(url, data, format='json')
-        
-        # Log the response content to see validation errors
-        logger.info(f"Response Status: {response.status_code}")
-        logger.info(f"Response Content: {response.content.decode()}")
-        
-        if response.status_code != status.HTTP_201_CREATED:
-            logger.error(f"Validation errors: {response.data}")
-            
+        response = self.client.post(url, data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+class AuthenticationTests(BaseTest):
+    def test_invalid_org(self):
+        """Test access with invalid org"""
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f'Bearer {self.access_token}',
+            HTTP_X_ORG='invalid-org-id'
+        )
+        url = reverse('common:document-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_unauthorized_access(self):
+        """Test unauthorized access"""
+        self.client.credentials()
+        url = reverse('common:document-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

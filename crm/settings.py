@@ -71,6 +71,7 @@ MIDDLEWARE = [
     'contacts.middleware.ProfileMiddleware',  # Add here if needed in production
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'common.middleware.OrgMiddleware',
 ]
 
 ROOT_URLCONF = "crm.urls"
@@ -159,6 +160,7 @@ ADMIN_EMAIL = os.environ["ADMIN_EMAIL"]
 # celery Tasks
 CELERY_BROKER_URL = os.environ["CELERY_BROKER_URL"]
 CELERY_RESULT_BACKEND = os.environ["CELERY_RESULT_BACKEND"]
+CELERY_TASK_ALWAYS_EAGER = True
 
 
 LOGGING = {
@@ -300,3 +302,5 @@ JWT_ALGO = "HS256"
 
 DOMAIN_NAME = os.environ["DOMAIN_NAME"]
 SWAGGER_ROOT_URL = os.environ["SWAGGER_ROOT_URL"]
+
+SEND_WELCOME_EMAIL = False 

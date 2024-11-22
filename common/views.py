@@ -1,13 +1,18 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, mixins
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.pagination import LimitOffsetPagination
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from django.core.cache import cache
+from django.conf import settings
+from rest_framework.exceptions import ValidationError
+import logging
+from rest_framework.viewsets import GenericViewSet
 
-from common.models import Document, Profile, User, APISettings
+from common.models import Document, Profile, User, APISettings, Comment
 from common.serializers import (
     CreateUserSerializer,
     ProfileSerializer,
@@ -24,39 +29,108 @@ from common.serializers import (
 )
 from teams.models import Teams
 from accounts.models import Tags
+from common.throttling import OrgRateThrottle
 
-class CommonViewSet(viewsets.ViewSet):
+logger = logging.getLogger(__name__)
+
+class CommonViewSet(mixins.CreateModelMixin,
+                   mixins.RetrieveModelMixin,
+                   mixins.UpdateModelMixin,
+                   mixins.DestroyModelMixin,
+                   GenericViewSet):
+    """
+    Use DRF generic mixins instead of custom ViewSet
+    """
     permission_classes = [IsAuthenticated]
+    throttle_classes = [OrgRateThrottle]
     
+    @extend_schema(
+        tags=['Dashboard'],
+        description='Get dashboard welcome message',
+        responses={200: {'type': 'object', 'properties': {'message': {'type': 'string'}}}}
+    )
     @action(detail=False, methods=['get'])
     def dashboard(self, request):
+        logger.debug("Dashboard endpoint accessed")
         return Response({
             "message": "Welcome to API Dashboard"
         })
 
+    @extend_schema(
+        tags=['Organizations'],
+        description='Create or retrieve organization details',
+        parameters=[
+            OpenApiParameter(
+                name='org',
+                type=str,
+                location=OpenApiParameter.HEADER,
+                description='Organization ID'
+            ),
+        ],
+        request=OrgProfileCreateSerializer,
+        responses={
+            200: ShowOrganizationListSerializer,
+            201: {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'},
+                    'org': {'type': 'object'}
+                }
+            },
+            400: {
+                'type': 'object',
+                'properties': {
+                    'error': {'type': 'string'},
+                    'details': {'type': 'object'}
+                }
+            }
+        }
+    )
     @action(detail=False, methods=['post', 'get'])
     def org(self, request):
-        if request.method == 'POST':
-            serializer = OrgProfileCreateSerializer(data=request.data)
-            if serializer.is_valid():
-                org = serializer.save()
-                return Response({
-                    "message": "Organization profile created successfully",
-                    "org": ShowOrganizationListSerializer(org).data
-                }, status=status.HTTP_201_CREATED)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        cache_key = f'org_{request.profile.org.id}'
+        cached_data = cache.get(cache_key)
+        
+        if cached_data:
+            logger.debug(f"Returning cached org data for {request.profile.org.id}")
+            return Response(cached_data)
             
-        # GET method
-        return Response({
-            "message": "Organization profile details",
-            "org": ShowOrganizationListSerializer(request.profile.org).data
-        })
+        logger.info(f"Org endpoint accessed by user {request.user.id} for org {request.profile.org.id}")
+        try:
+            if request.method == 'POST':
+                serializer = OrgProfileCreateSerializer(data=request.data)
+                if serializer.is_valid(raise_exception=True):
+                    org = serializer.save()
+                    response_data = {
+                        "message": "Organization profile created successfully",
+                        "org": ShowOrganizationListSerializer(org).data
+                    }
+                    cache.set(cache_key, response_data, timeout=settings.CACHE_TIMEOUT)
+                    return Response(response_data, status=status.HTTP_201_CREATED)
+            return Response({
+                "message": "Organization profile details",
+                "org": ShowOrganizationListSerializer(request.profile.org).data
+            })
+                    
+        except ValidationError as e:
+            logger.error(f"Validation error in org endpoint: {str(e)}")
+            return Response({
+                "error": "Validation Error",
+                "details": e.detail
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Unexpected error in org endpoint: {str(e)}")
+            return Response({
+                "error": "Internal Server Error",
+                "details": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ProfileViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = ProfileSerializer
     queryset = Profile.objects.all()
     pagination_class = LimitOffsetPagination
+    throttle_classes = [OrgRateThrottle]
     
     def get_queryset(self):
         queryset = Profile.objects.filter(org=self.request.profile.org)
@@ -70,10 +144,12 @@ class ProfileViewSet(viewsets.ModelViewSet):
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active)
             
+        logger.debug(f"Filtered profile queryset: {queryset.query}")
         return queryset
     
     @extend_schema(request=UserCreateSwaggerSerializer)
     def create(self, request):
+        logger.info(f"Creating new profile for org {request.profile.org.id}")
         serializer = CreateProfileSerializer(data=request.data)
         if serializer.is_valid():
             profile = serializer.save(org=request.profile.org)
@@ -81,6 +157,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
                 ProfileSerializer(profile).data,
                 status=status.HTTP_201_CREATED
             )
+        logger.error(f"Profile creation failed: {serializer.errors}")
         return Response(
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
@@ -97,12 +174,14 @@ class ProfileViewSet(viewsets.ModelViewSet):
             and not request.user.is_superuser
             and request.profile.id != profile.id
         ):
+            logger.warning(f"Permission denied for profile update: {request.user.id}")
             return Response(
                 {"error": "Permission Denied"},
                 status=status.HTTP_403_FORBIDDEN
             )
 
         if profile.org != request.profile.org:
+            logger.warning(f"Organization mismatch for profile update: {profile.id}")
             return Response(
                 {"error": "User organization mismatch"},
                 status=status.HTTP_403_FORBIDDEN
@@ -126,6 +205,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
         }
 
         if not all(s.is_valid() for s in serializers_data.values()):
+            logger.error(f"Profile update validation failed: {serializers_data}")
             return Response(
                 {k: s.errors for k, s in serializers_data.items()},
                 status=status.HTTP_400_BAD_REQUEST
@@ -134,6 +214,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
         for serializer in serializers_data.values():
             serializer.save()
 
+        logger.info(f"Profile updated successfully: {profile.id}")
         return Response(
             {"message": "User Updated Successfully"},
             status=status.HTTP_200_OK
@@ -143,12 +224,14 @@ class ProfileViewSet(viewsets.ModelViewSet):
         profile = self.get_object()
         
         if request.profile.role != "ADMIN" and not request.user.is_superuser:
+            logger.warning(f"Permission denied for profile deletion: {request.user.id}")
             return Response(
                 {"error": "Permission denied"},
                 status=status.HTTP_403_FORBIDDEN
             )
             
         profile.delete()
+        logger.info(f"Profile deleted: {pk}")
         return Response(
             {"message": "Profile deleted successfully"},
             status=status.HTTP_204_NO_CONTENT
@@ -158,6 +241,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
     @extend_schema(request=UserUpdateStatusSwaggerSerializer)
     def status(self, request, pk=None):
         if request.profile.role != "ADMIN" and not request.user.is_superuser:
+            logger.warning(f"Permission denied for status update: {request.user.id}")
             return Response(
                 {"error": "Permission denied"},
                 status=status.HTTP_403_FORBIDDEN
@@ -171,6 +255,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
         
         new_status = request.data.get("status")
         if new_status not in status_map:
+            logger.error(f"Invalid status value: {new_status}")
             return Response(
                 {"error": "Invalid status value"},
                 status=status.HTTP_400_BAD_REQUEST
@@ -178,6 +263,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
 
         profile.is_active = status_map[new_status]
         profile.save()
+        logger.info(f"Profile status updated: {pk} -> {new_status}")
 
         profiles = self.get_queryset()
         return Response({
@@ -196,6 +282,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
     serializer_class = DocumentSerializer
     queryset = Document.objects.all()
     pagination_class = LimitOffsetPagination
+    throttle_classes = [OrgRateThrottle]
 
     def get_queryset(self):
         queryset = Document.objects.filter(org=self.request.profile.org)
@@ -262,16 +349,33 @@ class DocumentViewSet(viewsets.ModelViewSet):
             status=status.HTTP_204_NO_CONTENT
         )
     @action(detail=True, methods=['post'])
+    @extend_schema(
+        tags=['Documents'],
+        description='Share document with users',
+        request={
+            'type': 'object',
+            'properties': {
+                'shared_to': {'type': 'array', 'items': {'type': 'string'}},
+                'comment': {'type': 'string'}
+            }
+        },
+        responses={
+            200: {'type': 'object', 'properties': {'status': {'type': 'string'}}},
+            400: {'type': 'object', 'properties': {'error': {'type': 'string'}}},
+            403: {'type': 'object', 'properties': {'error': {'type': 'string'}}},
+            404: {'type': 'object', 'properties': {'error': {'type': 'string'}}}
+        }
+    )
     def share(self, request, pk=None):
         document = self.get_object()
         shared_to = request.data.get("shared_to", [])
-        comment = request.data.get("comment", "")
+        comment_text = request.data.get("comment", "")
 
         document.shared_to.add(*shared_to)
 
-        if comment:
-            comment.objects.create(
-                comment=comment,
+        if comment_text:
+            Comment.objects.create(
+                comment=comment_text,
                 created_by=request.profile,
                 document=document
             )
@@ -281,10 +385,13 @@ class DocumentViewSet(viewsets.ModelViewSet):
 class APISettingsViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = APISettingsSerializer
-    queryset = APISettings.objects.all()
     pagination_class = LimitOffsetPagination
+    throttle_classes = [OrgRateThrottle]
 
     def get_queryset(self):
+        if not hasattr(self.request, 'profile') or not self.request.profile:
+            return APISettings.objects.none()
+            
         queryset = APISettings.objects.filter(org=self.request.profile.org)
         
         # Add filters
@@ -332,6 +439,7 @@ class APISettingsViewSet(viewsets.ModelViewSet):
             {"message": "API Settings deleted successfully"},
             status=status.HTTP_204_NO_CONTENT
         )
+
     @action(detail=True, methods=['post'])
     def update_tags(self, request, pk=None):
         api_setting = self.get_object()

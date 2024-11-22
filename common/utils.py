@@ -1,28 +1,78 @@
 import pytz
 from django.utils.translation import gettext_lazy as _
+import logging
+import magic
+import os
+
+logger = logging.getLogger(__name__)
 
 
 def jwt_payload_handler(user):
-    """Custom payload handler
-    Token encrypts the dictionary returned by this function, and can be
-    decoded by rest_framework_jwt.utils.jwt_decode_handler
-    """
-    return {
-        "id": user.pk,
-        # 'name': user.name,
-        "email": user.email,
-        # "role": user.role,
-        # "has_sales_access": user.has_sales_access,
-        # "has_marketing_access": user.has_marketing_access,
-        "file_prepend": user.file_prepend,
-        "username": user.email,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "is_active": user.is_active,
-        # "is_admin": user.is_admin,
-        "is_staff": user.is_staff,
-        # "date_joined"
-    }
+    """Custom payload handler for JWT tokens"""
+    try:
+        payload = {
+            "id": user.pk,
+            "email": user.email,
+            "file_prepend": user.file_prepend,
+            "username": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "is_active": user.is_active,
+            "is_staff": user.is_staff,
+        }
+        logger.debug(f"Generated JWT payload for user {user.email}")
+        return payload
+    except Exception as e:
+        logger.error(f"Error generating JWT payload: {str(e)}")
+        return None
+
+
+def convert_to_custom_timezone(custom_date, custom_timezone, to_utc=False):
+    """Convert datetime between timezones"""
+    try:
+        user_time_zone = pytz.timezone(custom_timezone)
+        if to_utc:
+            custom_date = user_time_zone.localize(custom_date.replace(tzinfo=None))
+            user_time_zone = pytz.UTC
+        return custom_date.astimezone(user_time_zone)
+    except Exception as e:
+        logger.error(f"Timezone conversion error: {str(e)}")
+        return custom_date
+
+
+def return_complete_address(self):
+    """Return formatted complete address"""
+    try:
+        components = []
+        if self.address_line:
+            components.append(self.address_line)
+        if self.street:
+            components.append(self.street)
+        if self.city:
+            components.append(self.city)
+        if self.state:
+            components.append(self.state)
+        if self.postcode:
+            components.append(self.postcode)
+        if self.country:
+            components.append(self.get_country_display())
+            
+        return ", ".join(filter(None, components))
+    except Exception as e:
+        logger.error(f"Address formatting error: {str(e)}")
+        return ""
+
+
+def append_str_to(append_to: str, *args, sep=", ", **kwargs):
+    """Concatenate strings with separator"""
+    try:
+        append_to = append_to or ""
+        result_list = [append_to] + list(args) + list(kwargs.values())
+        data = any(filter(None, result_list))
+        return f"{sep}".join(filter(len, result_list)) if data else ""
+    except Exception as e:
+        logger.error(f"String concatenation error: {str(e)}")
+        return append_to
 
 
 INDCHOICES = (
@@ -555,38 +605,6 @@ CURRENCY_CODES = (
 )
 
 
-def return_complete_address(self):
-    address = ""
-    if self.address_line:
-        address += self.address_line
-    if self.street:
-        if address:
-            address += ", " + self.street
-        else:
-            address += self.street
-    if self.city:
-        if address:
-            address += ", " + self.city
-        else:
-            address += self.city
-    if self.state:
-        if address:
-            address += ", " + self.state
-        else:
-            address += self.state
-    if self.postcode:
-        if address:
-            address += ", " + self.postcode
-        else:
-            address += self.postcode
-    if self.country:
-        if address:
-            address += ", " + self.get_country_display()
-        else:
-            address += self.get_country_display()
-    return address
-
-
 def get_client_ip(request):
     x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
     if x_forwarded_for:
@@ -596,29 +614,33 @@ def get_client_ip(request):
     return ip
 
 
-def convert_to_custom_timezone(custom_date, custom_timezone, to_utc=False):
-    user_time_zone = pytz.timezone(custom_timezone)
-    if to_utc:
-        custom_date = user_time_zone.localize(custom_date.replace(tzinfo=None))
-        user_time_zone = pytz.UTC
-    return custom_date.astimezone(user_time_zone)
+def is_document_file_audio(ext):
+    audio_extensions = ['mp3', 'wav', 'ogg', 'm4a']
+    return ext.lower() in audio_extensions
 
+def is_document_file_video(ext):
+    video_extensions = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv']
+    return ext.lower() in video_extensions
 
-def append_str_to(append_to: str, *args, sep=", ", **kwargs):
-    """Concatenate to a string.
-    Args:
-        append_to(str): The string to append to.
-        args(list): list of string characters to concatenate.
-        sep(str): Seperator to use between concatenated strings.
-        kwargs(dict): Mapping of variables with intended string values.
-    Returns:
-        str, joined strings seperated
-    """
-    append_to = append_to or ""
-    result_list = [append_to] + list(args) + list(kwargs.values())
-    data = False
-    for item in result_list:
-        if item:
-            data = True
-            break
-    return f"{sep}".join(filter(len, result_list)) if data else ""
+def is_document_file_image(ext):
+    image_extensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg']
+    return ext.lower() in image_extensions
+
+def is_document_file_pdf(ext):
+    return ext.lower() == 'pdf'
+
+def is_document_file_code(ext):
+    code_extensions = ['py', 'js', 'java', 'cpp', 'h', 'html', 'css']
+    return ext.lower() in code_extensions
+
+def is_document_file_text(ext):
+    text_extensions = ['txt', 'md', 'rtf', 'doc', 'docx']
+    return ext.lower() in text_extensions
+
+def is_document_file_sheet(ext):
+    sheet_extensions = ['xls', 'xlsx', 'csv']
+    return ext.lower() in sheet_extensions
+
+def is_document_file_zip(ext):
+    zip_extensions = ['zip', 'rar', '7z', 'tar', 'gz']
+    return ext.lower() in zip_extensions

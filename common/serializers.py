@@ -23,7 +23,13 @@ from users.serializers import UserSerializer
 class OrganizationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Org
-        fields = ("id", "name","api_key")
+        fields = ("id", "name", "api_key")
+        read_only_fields = ("api_key",)
+
+    def validate_name(self, value):
+        if len(value) < 3:
+            raise serializers.ValidationError("Organization name must be at least 3 characters long")
+        return value
 
 
 class SocialLoginSerializer(serializers.Serializer):
@@ -382,5 +388,14 @@ class UserUpdateStatusSwaggerSerializer(serializers.Serializer):
     STATUS_CHOICES = ["Active", "Inactive"]
 
     status = serializers.ChoiceField(choices = STATUS_CHOICES,required=True)
+
+
+class OrganizationDetailSerializer(serializers.ModelSerializer):
+    profiles = ProfileSerializer(many=True, read_only=True)
+    documents = DocumentSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Org
+        fields = ('id', 'name', 'api_key', 'profiles', 'documents')
 
 

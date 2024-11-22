@@ -148,3 +148,73 @@ def send_scheduled_emails():
             and str(scheduled_date_time.minute) == str(sent_time.minute)
         ):
             send_email.delay(each.id)
+
+@shared_task
+def send_account_status_email(account_id, status_changed_by_id=None):
+    """Send email when account status changes"""
+    try:
+        account = Account.objects.filter(id=account_id).first()
+        if not account:
+            return False
+
+        changed_by = None
+        if status_changed_by_id:
+            changed_by = Profile.objects.filter(id=status_changed_by_id).first()
+
+        context = {
+            'account': account,
+            'changed_by': changed_by.user.email if changed_by else 'System',
+            'url': settings.DOMAIN_NAME,
+        }
+
+        subject = f"Account Status Updated: {account.name}"
+        html_content = render_to_string(
+            'email_templates/account_status_update.html',
+            context=context
+        )
+
+        recipients = []
+        if account.email:
+            recipients.append(account.email)
+
+        if recipients:
+            msg = EmailMessage(
+                subject=subject,
+                body=html_content,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=recipients
+            )
+            msg.content_subtype = "html"
+            return msg.send()
+        return False
+        
+    except Exception as e:
+        print(f"Error sending account status email: {str(e)}")
+        return False
+
+@shared_task
+def send_account_deleted_email(account_email, deleted_by_email=None):
+    """Send email when account is deleted"""
+    try:
+        subject = "Account Deleted"
+        context = {
+            'deleted_by': deleted_by_email if deleted_by_email else 'System',
+            'url': settings.DOMAIN_NAME,
+        }
+        
+        html_content = render_to_string(
+            'email_templates/account_deleted.html',
+            context=context
+        )
+        
+        msg = EmailMessage(
+            subject=subject,
+            body=html_content,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[account_email]
+        )
+        msg.content_subtype = "html"
+        return msg.send()
+    except Exception as e:
+        print(f"Error sending account deleted email: {str(e)}")
+        return False

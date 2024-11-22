@@ -11,7 +11,7 @@ from phonenumber_field.modelfields import PhoneNumberField
 from django.conf import settings
 from users.models import Users as User
 
-from common.templatetags.common_tags import (
+from common.utils import (
     is_document_file_audio,
     is_document_file_code,
     is_document_file_image,
@@ -20,8 +20,9 @@ from common.templatetags.common_tags import (
     is_document_file_text,
     is_document_file_video,
     is_document_file_zip,
+    COUNTRIES,
+    ROLES
 )
-from common.utils import COUNTRIES, ROLES
 from common.base import BaseModel
 
 
@@ -89,7 +90,7 @@ from django.db import models
 from users.models import Users as User
 
 
-class Org(models.Model):
+class Org(BaseModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255, default="default name")
     address = models.TextField(null=True, blank=True)
@@ -106,6 +107,25 @@ class Org(models.Model):
 
     def __str__(self):
         return str(self.name)
+
+    def get_active_profiles(self):
+        return self.profile_set.filter(is_active=True)
+    
+    def get_admin_profiles(self):
+        return self.profile_set.filter(is_organization_admin=True)
+    
+    @property
+    def total_documents(self):
+        return self.document_set.count()
+
+    def generate_api_key(self):
+        """Generate a random API key"""
+        return binascii.hexlify(os.urandom(20)).decode()
+
+    def save(self, *args, **kwargs):
+        if not self.api_key:
+            self.api_key = self.generate_api_key()
+        super().save(*args, **kwargs)
 
 
 class Profile(BaseModel):
@@ -228,11 +248,34 @@ def document_path(self, filename):
 
 
 class Document(BaseModel):
+    DOCUMENT_STATUS_CHOICE = (
+        ("active", "Active"),
+        ("inactive", "Inactive"),
+        ("deleted", "Deleted"),
+    )
 
-    DOCUMENT_STATUS_CHOICE = (("active", "active"), ("inactive", "inactive"))
-
-    title = models.TextField(blank=True, null=True)
-    document_file = models.FileField(upload_to=document_path, max_length=5000)
+    title = models.CharField(
+        _("Title"), 
+        max_length=100, 
+        default="Untitled Document"
+    )
+    document_file = models.FileField(
+        _("Document"), 
+        upload_to='documents/',
+        null=True,
+        blank=True
+    )
+    status = models.CharField(
+        _("Status"),
+        choices=DOCUMENT_STATUS_CHOICE, 
+        max_length=64, 
+        default="active"
+    )
+    description = models.TextField(
+        _("Description"), 
+        blank=True, 
+        null=True
+    )
     created_by = models.ForeignKey(
         Profile,
         related_name="document_uploaded",
@@ -241,9 +284,6 @@ class Document(BaseModel):
         blank=True,
     )
     
-    status = models.CharField(
-        choices=DOCUMENT_STATUS_CHOICE, max_length=64, default="active"
-    )
     shared_to = models.ManyToManyField(Profile, related_name="document_shared_to")
     teams = models.ManyToManyField("teams.Teams", related_name="document_teams")
     org = models.ForeignKey(

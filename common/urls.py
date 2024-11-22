@@ -3,45 +3,33 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt import views as jwt_views
 from . import views
 
-app_name = "api_common"
+app_name = "common"
 
 router = DefaultRouter()
-router.register(r'common', views.CommonViewSet, basename='common')
-router.register(r'profiles', views.ProfileViewSet, basename='profile')
+router.register(r'v1/common', views.CommonViewSet, basename='common')
+router.register(r'v1/profiles', views.ProfileViewSet)
 router.register(r'documents', views.DocumentViewSet, basename='document')
 router.register(r'api-settings', views.APISettingsViewSet, basename='api-settings')
+router.register(r'orgs', views.OrgViewSet, basename='org')
 
 urlpatterns = [
     # Default router URLs
     path('', include(router.urls)),
     
-    # JWT Authentication
-    path(
-        "auth/refresh-token/",
-        jwt_views.TokenRefreshView.as_view(),
-        name="token_refresh"
-    ),
+    # JWT token URLs
+    path('token/', jwt_views.TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('token/refresh/', jwt_views.TokenRefreshView.as_view(), name='token_refresh'),
     
-    # Custom endpoints mapped to ViewSet actions
+    # Profile specific endpoints
     path(
-        'dashboard/',
-        views.CommonViewSet.as_view({'get': 'dashboard'}),
-        name='dashboard'
+        'profiles/<str:pk>/activate/',
+        views.ProfileViewSet.as_view({'post': 'activate'}),
+        name='profile-activate'
     ),
-    
     path(
-        'org/',
-        views.CommonViewSet.as_view({
-            'get': 'org',
-            'post': 'org'
-        }),
-        name='org'
-    ),
-    
-    path(
-        'profiles/<str:pk>/status/',
-        views.ProfileViewSet.as_view({'post': 'status'}),
-        name='profile-status'
+        'profiles/<str:pk>/deactivate/',
+        views.ProfileViewSet.as_view({'post': 'deactivate'}),
+        name='profile-deactivate'
     ),
     
     # Document specific endpoints
