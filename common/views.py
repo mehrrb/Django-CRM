@@ -12,7 +12,7 @@ from rest_framework.exceptions import ValidationError
 import logging
 from rest_framework.viewsets import GenericViewSet
 
-from common.models import Document, Profile, User, APISettings, Comment
+from common.models import Document, Profile, APISettings, Comment,Org
 from common.serializers import (
     CreateUserSerializer,
     ProfileSerializer,
@@ -25,11 +25,13 @@ from common.serializers import (
     UserCreateSwaggerSerializer,
     UserUpdateStatusSwaggerSerializer,
     OrgProfileCreateSerializer,
-    ShowOrganizationListSerializer
+    ShowOrganizationListSerializer,
+    OrgSerializer
 )
 from teams.models import Teams
 from accounts.models import Tags
 from common.throttling import OrgRateThrottle
+from users.models import Users as User
 
 logger = logging.getLogger(__name__)
 
@@ -446,3 +448,53 @@ class APISettingsViewSet(viewsets.ModelViewSet):
         api_setting.tags = request.data["tags"]
         api_setting.save()
         return Response({"status": "tags updated successfully"})
+
+class OrgViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = OrgSerializer
+    throttle_classes = [OrgRateThrottle]
+    pagination_class = LimitOffsetPagination
+    
+    def get_queryset(self):
+        if not hasattr(self.request, 'profile') or not self.request.profile:
+            logger.warning("No profile found in request")
+            return Org.objects.none()
+        
+        try:
+            org_id = self.request.profile.org_id
+            if not org_id:
+                logger.error(f"No org found for profile {self.request.profile.id}")
+                return Org.objects.none()
+            
+            return Org.objects.filter(id=org_id)
+        
+        except AttributeError as e:
+            logger.error(f"Error accessing org: {str(e)}")
+            return Org.objects.none()
+
+    def perform_create(self, serializer):
+        if self.request.profile.role != "ADMIN":
+            raise ValidationError({"error": "Only admin can create organizations"})
+        org = serializer.save(
+            created_by=self.request.profile
+        )
+        return org
+
+    def perform_update(self, serializer):
+        if self.request.profile.role != "ADMIN":
+            raise ValidationError({"error": "Only admin can update organizations"})
+        org = serializer.save()
+        return org
+
+    def destroy(self, request, *args, **kwargs):
+        if request.profile.role != "ADMIN":
+            return Response(
+                {"error": "Only admin can delete organizations"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        org = self.get_object()
+        org.delete()
+        return Response(
+            {"message": "Organization deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT
+        )

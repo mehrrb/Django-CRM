@@ -1,6 +1,9 @@
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 import six
 import logging
+import secrets
+import hashlib
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,23 @@ class TokenGenerator(PasswordResetTokenGenerator):
         except Exception as e:
             logger.error(f"Error checking token: {str(e)}")
             return False
+
+def generate_key():
+    """Generate a random API key"""
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    random_string = secrets.token_hex(16)
+    key = f"{timestamp}{random_string}"
+    
+    return hashlib.sha1(key.encode()).hexdigest()
+
+def verify_jwt_token(token):
+    """Verify JWT token"""
+    from rest_framework_simplejwt.tokens import AccessToken
+    try:
+        access_token = AccessToken(token)
+        return True, access_token.payload
+    except Exception:
+        return False, None
 
 # Create a single instance to be used throughout the app
 account_activation_token = TokenGenerator()

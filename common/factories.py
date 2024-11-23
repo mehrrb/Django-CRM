@@ -33,15 +33,14 @@ class ProfileFactory(DjangoModelFactory):
     role = FuzzyChoice(['ADMIN', 'MEMBER'])
     is_active = True
 
-class DocumentFactory(DjangoModelFactory):
+class DocumentFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Document
     
-    title = factory.Sequence(lambda n: f'Test Document {n}')
-    document_file = factory.django.FileField(filename='test.pdf')
+    title = factory.Faker('sentence')
     created_by = factory.SubFactory(ProfileFactory)
+    org = factory.SelfAttribute('created_by.org')
     status = FuzzyChoice(['active', 'inactive'])
-    org = factory.SubFactory(OrgFactory)
     description = factory.Faker('paragraph')
 
 class APISettingsFactory(DjangoModelFactory):

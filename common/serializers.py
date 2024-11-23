@@ -399,3 +399,45 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'api_key', 'profiles', 'documents')
 
 
+class OrgSerializer(serializers.ModelSerializer):
+    created_by = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = Org
+        fields = (
+            'id', 
+            'name', 
+            'address', 
+            'country',
+            'created_by',
+            'created_at',
+            'updated_at',
+            'api_key'
+        )
+        read_only_fields = (
+            'id', 
+            'created_by', 
+            'created_at', 
+            'updated_at',
+            'api_key'
+        )
+
+    def validate_name(self, value):
+        if len(value) < 3:
+            raise serializers.ValidationError(
+                "Organization name must be at least 3 characters long"
+            )
+        if bool(re.search(r"[~\!_.@#\$%\^&\*\ \(\)\+{}\":;'/\[\]]", value)):
+            raise serializers.ValidationError(
+                "Organization name should not contain special characters"
+            )
+        return value
+
+    def validate_country(self, value):
+        if value and len(value) != 2:
+            raise serializers.ValidationError(
+                "Country code must be 2 characters long (ISO format)"
+            )
+        return value.upper() if value else value
+
+

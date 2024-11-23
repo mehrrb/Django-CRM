@@ -98,6 +98,11 @@ class Org(BaseModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name="org_user")
     country = models.CharField(max_length=100, null=True, blank=True)
     api_key = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    profiles = models.ManyToManyField(
+        'Users',
+        through='Profile',
+        related_name='organizations'
+    )
 
     class Meta:
         verbose_name = "Organization"
@@ -126,6 +131,10 @@ class Org(BaseModel):
         if not self.api_key:
             self.api_key = self.generate_api_key()
         super().save(*args, **kwargs)
+
+    @property
+    def profiles(self):
+        return self.profile_set.all()
 
 
 class Profile(BaseModel):
@@ -165,11 +174,10 @@ class Profile(BaseModel):
 
     @property
     def user_details(self):
-        return  {
-            'email' : self.user.email,
-            'id' :  self.user.id,
-            'is_active' : self.user.is_active,
-            'profile_pic' : self.user.profile_pic
+        return {
+            'email': self.user.email,
+            'id': self.user.id,
+            'is_active': self.user.is_active
         }
 
 
