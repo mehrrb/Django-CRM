@@ -1,6 +1,7 @@
 import factory
 from factory.django import DjangoModelFactory
 from factory.fuzzy import FuzzyChoice
+from .token_generator import generate_key
 from .models import Org, Profile, Document, APISettings, Address
 from users.factories import UserFactory
 
@@ -47,7 +48,8 @@ class APISettingsFactory(DjangoModelFactory):
     class Meta:
         model = APISettings
     
+    org = factory.SubFactory(OrgFactory)
+    created_by = factory.SubFactory(ProfileFactory)
+    api_key = factory.LazyFunction(generate_key)  # Use api_key instead of token
     title = factory.Faker('sentence')
     website = factory.Faker('url')
-    created_by = factory.SubFactory(ProfileFactory)
-    org = factory.SubFactory(OrgFactory)

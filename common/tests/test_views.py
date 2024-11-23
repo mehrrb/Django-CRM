@@ -1,14 +1,23 @@
 import pytest
 from django.urls import reverse
 from rest_framework import status
+from common.middleware.get_company import OrgMiddleware
 
 @pytest.mark.django_db
 class TestProfileViewSet:
+    def setup_method(self):
+        """Setup for each test method"""
+        self.middleware = OrgMiddleware(lambda x: x)
+
     def test_list_profiles(self, api_client, profile, auth_headers):
         """Test listing profiles"""
         api_client.force_authenticate(user=profile.user)
-        request = api_client.get('/').wsgi_request
-        request.profile = profile
+        
+        # Add JWT token to headers
+        from rest_framework_simplejwt.tokens import AccessToken
+        token = str(AccessToken.for_user(profile.user))
+        auth_headers['HTTP_AUTHORIZATION'] = f'Bearer {token}'
+        auth_headers['HTTP_X_ORG'] = str(profile.org.id)
         
         url = reverse('common:profile-list')
         response = api_client.get(url, **auth_headers)
@@ -29,7 +38,8 @@ class TestProfileViewSet:
         """Test updating a profile"""
         api_client.force_authenticate(user=profile.user)
         request = api_client.get('/').wsgi_request
-        request.profile = profile
+        request.user = profile.user
+        self.middleware.process_request(request)
         
         url = reverse('common:profile-detail', args=[profile.id])
         data = {'role': 'ADMIN'}
@@ -38,11 +48,19 @@ class TestProfileViewSet:
 
 @pytest.mark.django_db
 class TestDocumentViewSet:
+    def setup_method(self):
+        """Setup for each test method"""
+        self.middleware = OrgMiddleware(lambda x: x)
+
     def test_list_documents(self, api_client, document, profile, auth_headers):
         """Test listing documents"""
         api_client.force_authenticate(user=profile.user)
-        request = api_client.get('/').wsgi_request
-        request.profile = profile
+        
+        # Add JWT token to headers
+        from rest_framework_simplejwt.tokens import AccessToken
+        token = str(AccessToken.for_user(profile.user))
+        auth_headers['HTTP_AUTHORIZATION'] = f'Bearer {token}'
+        auth_headers['HTTP_X_ORG'] = str(profile.org.id)
         
         url = reverse('common:document-list')
         response = api_client.get(url, **auth_headers)

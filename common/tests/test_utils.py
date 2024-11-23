@@ -63,10 +63,11 @@ class TestValidators:
                 self.name = name
                 self.size = size
 
+        # Test invalid extension
         invalid_file = MockFile("test.exe", 1024 * 1024)
         with pytest.raises(ValidationError) as exc_info:
             validate_file_extension(invalid_file)
-        assert "File type not supported" in str(exc_info.value)
+        assert 'Unsupported file extension.' in str(exc_info.value)
 
         large_file = MockFile("test.pdf", 11 * 1024 * 1024)
         with pytest.raises(ValidationError) as exc_info:

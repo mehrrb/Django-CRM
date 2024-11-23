@@ -98,11 +98,6 @@ class Org(BaseModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name="org_user")
     country = models.CharField(max_length=100, null=True, blank=True)
     api_key = models.CharField(max_length=100, unique=True, null=True, blank=True)
-    profiles = models.ManyToManyField(
-        'Users',
-        through='Profile',
-        related_name='organizations'
-    )
 
     class Meta:
         verbose_name = "Organization"
@@ -113,6 +108,10 @@ class Org(BaseModel):
     def __str__(self):
         return str(self.name)
 
+    @property
+    def active_profiles(self):
+        return self.profile_set.filter(is_active=True)
+    
     def get_active_profiles(self):
         return self.profile_set.filter(is_active=True)
     
@@ -132,13 +131,9 @@ class Org(BaseModel):
             self.api_key = self.generate_api_key()
         super().save(*args, **kwargs)
 
-    @property
-    def profiles(self):
-        return self.profile_set.all()
-
 
 class Profile(BaseModel):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.OneToOneField('users.Users', on_delete=models.CASCADE)
     org = models.ForeignKey(
         Org, null=True, on_delete=models.CASCADE, blank=True, related_name="user_org"
     )
@@ -363,40 +358,16 @@ def generate_key():
 
 
 class APISettings(BaseModel):
-    title = models.TextField()
-    apikey = models.CharField(max_length=16, blank=True)
-    website = models.URLField(max_length=255, null=True)
-    lead_assigned_to = models.ManyToManyField(
-        Profile, related_name="lead_assignee_users"
-    )
-    tags = models.ManyToManyField("accounts.Tags", blank=True)
-    created_by = models.ForeignKey(
-        Profile,
-        related_name="settings_created_by",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-    )
-    org = models.ForeignKey(
-        Org,
-        blank=True,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="org_api_settings",
-    )
-    
+    org = models.ForeignKey(Org, on_delete=models.CASCADE, null=True)  # Allow null temporarily
+    created_by = models.ForeignKey('Profile', on_delete=models.CASCADE, null=True)  # Allow null temporarily
+    api_key = models.CharField(max_length=40, unique=True, null=True)  # Keep using api_key instead of token
+    title = models.CharField(max_length=200, null=True)
+    website = models.URLField(null=True)
 
     class Meta:
-        verbose_name = "APISetting"
-        verbose_name_plural = "APISettings"
-        db_table = "apiSettings"
-        ordering = ("-created_at",)
-
-    def __str__(self):
-        return f"{self.title}"
-    
+        db_table = 'apiSettings'
 
     def save(self, *args, **kwargs):
-        if not self.apikey or self.apikey is None or self.apikey == "":
-            self.apikey = generate_key()
+        if not self.api_key:
+            self.api_key = generate_key()
         super().save(*args, **kwargs)

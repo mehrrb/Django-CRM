@@ -23,18 +23,13 @@ class TestAuthentication:
         api_settings = APISettingsFactory(
             org=org,
             created_by=profile,
-            token=api_key
+            api_key=api_key  # Use api_key instead of token
         )
         
         headers = {
-            'HTTP_TOKEN': api_key,
+            'HTTP_API_KEY': api_settings.api_key,
             'HTTP_ORG': str(org.id)
         }
-        
-        # Set profile in request
-        api_client.force_authenticate(user=profile.user)
-        request = api_client.get('/').wsgi_request
-        request.profile = profile
         
         url = reverse('common:document-list')
         response = api_client.get(url, **headers)

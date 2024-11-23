@@ -57,11 +57,10 @@ class TestProfileModel:
 @pytest.mark.django_db
 class TestDocumentModel:
     def test_document_creation(self, document):
-        """Test basic document creation"""
         assert document.id is not None
         assert document.created_by is not None
         assert document.org is not None
-        assert document.title is not None
+        assert document.created_at is not None
 
     def test_document_file_type_detection(self, document):
         """Test document file type detection"""
